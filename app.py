@@ -83,22 +83,29 @@ print("APP.PY: Initialization complete.", flush=True)
 
 def load_config():
     """Load configuration from environment variables (production) or config.yaml (local)"""
-    config = {}
-    
-    # Try environment variables first (for production deployment)
-    api_key = os.environ.get('HEYREACH_API_KEY')
-    if api_key:
-        logger.info("Loading configuration from environment variables (production mode)")
-        base_url = os.environ.get('HEYREACH_BASE_URL', 'https://api.heyreach.io')
+    try:
+        print("load_config(): Starting...", flush=True)
+        config = {}
         
-        # Build config from environment variables
-        config['heyreach'] = {
-            'api_key': api_key,
-            'base_url': base_url,
-            'sender_ids': [],
-            'sender_names': {},
-            'client_groups': {}
-        }
+        # Try environment variables first (for production deployment)
+        api_key = os.environ.get('HEYREACH_API_KEY')
+        print(f"load_config(): HEYREACH_API_KEY from env: {bool(api_key)}", flush=True)
+        
+        if api_key:
+            print("load_config(): API key found, loading from environment variables", flush=True)
+            logger.info("Loading configuration from environment variables (production mode)")
+            base_url = os.environ.get('HEYREACH_BASE_URL', 'https://api.heyreach.io')
+            print(f"load_config(): Base URL: {base_url}", flush=True)
+            
+            # Build config from environment variables
+            config['heyreach'] = {
+                'api_key': api_key,
+                'base_url': base_url,
+                'sender_ids': [],
+                'sender_names': {},
+                'client_groups': {}
+            }
+            print("load_config(): Base config created", flush=True)
         
         # Try to load sender_ids from environment variable (JSON format)
         sender_ids_str = os.environ.get('HEYREACH_SENDER_IDS', '[]')
@@ -141,72 +148,120 @@ def load_config():
             except (json.JSONDecodeError, TypeError):
                 logger.warning("Failed to parse HEYREACH_CLIENT_GROUPS from environment")
         
-        return config
-    
-    # Fallback to config.yaml (for local development)
-    try:
-        logger.info("Loading configuration from config.yaml (local development mode)")
-        with open('config.yaml', 'r') as f:
-            config = yaml.safe_load(f)
-        return config
-    except FileNotFoundError:
-        logger.error("config.yaml not found and no environment variables set!")
-        return None
+            print(f"load_config(): Returning config with api_key: {bool(config.get('heyreach', {}).get('api_key'))}", flush=True)
+            return config
+        
+        # Fallback to config.yaml (for local development)
+        print("load_config(): No API key in environment, trying config.yaml...", flush=True)
+        try:
+            logger.info("Loading configuration from config.yaml (local development mode)")
+            with open('config.yaml', 'r') as f:
+                config = yaml.safe_load(f)
+            print("load_config(): Config loaded from config.yaml", flush=True)
+            return config
+        except FileNotFoundError:
+            error_msg = "config.yaml not found and no environment variables set!"
+            print(f"load_config(): ERROR - {error_msg}", flush=True)
+            logger.error(error_msg)
+            return None
+        except Exception as e:
+            error_msg = f"Error loading config: {e}"
+            print(f"load_config(): ERROR - {error_msg}", flush=True)
+            import traceback
+            print(f"load_config(): TRACEBACK:\n{traceback.format_exc()}", flush=True)
+            logger.error(error_msg)
+            return None
     except Exception as e:
-        logger.error(f"Error loading config: {e}")
+        error_msg = f"Exception in load_config(): {e}"
+        print(f"load_config(): EXCEPTION - {error_msg}", flush=True)
+        import traceback
+        print(f"load_config(): TRACEBACK:\n{traceback.format_exc()}", flush=True)
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
         return None
 
 
 def init_client():
     """Initialize HeyReach client"""
     global heyreach_client
-    config = load_config()
-    if not config:
-        return False
-    
-    heyreach_config = config.get('heyreach', {})
-    api_key = heyreach_config.get('api_key')
-    base_url = heyreach_config.get('base_url', 'https://api.heyreach.io')
-    
-    # Get manually configured sender IDs if available
-    sender_ids = heyreach_config.get('sender_ids', [])
-    sender_names = heyreach_config.get('sender_names', {})
-    client_groups = heyreach_config.get('client_groups', {})
-    
-    # Convert sender_names keys to integers if they're strings
-    if sender_names:
-        processed_sender_names = {}
-        for key, value in sender_names.items():
-            try:
-                key_int = int(key) if isinstance(key, str) else key
-                processed_sender_names[key_int] = value
-            except (ValueError, TypeError):
-                processed_sender_names[key] = value
-        sender_names = processed_sender_names
-    
-    if not api_key:
-        logger.error("HeyReach API key not found in config.yaml or environment variables")
-        logger.error("Please set HEYREACH_API_KEY environment variable")
-        return False
-    
     try:
-        heyreach_client = HeyReachClient(
-            api_key=api_key, 
-            base_url=base_url,
-            sender_ids=sender_ids,
-            sender_names=sender_names,
-            client_groups=client_groups
-        )
-        logger.info("✅ HeyReach client initialized successfully")
-        if sender_ids:
-            logger.info(f"📋 Using {len(sender_ids)} manually configured sender IDs")
-        if client_groups:
-            logger.info(f"📦 Loaded {len(client_groups)} client groups")
-        return True
+        print("init_client(): Starting...", flush=True)
+        config = load_config()
+        if not config:
+            print("init_client(): load_config() returned None", flush=True)
+            logger.error("init_client(): load_config() returned None")
+            return False
+        
+        print("init_client(): Config loaded successfully", flush=True)
+        heyreach_config = config.get('heyreach', {})
+        api_key = heyreach_config.get('api_key')
+        base_url = heyreach_config.get('base_url', 'https://api.heyreach.io')
+        
+        print(f"init_client(): API key present: {bool(api_key)}", flush=True)
+        print(f"init_client(): Base URL: {base_url}", flush=True)
+        
+        # Get manually configured sender IDs if available
+        sender_ids = heyreach_config.get('sender_ids', [])
+        sender_names = heyreach_config.get('sender_names', {})
+        client_groups = heyreach_config.get('client_groups', {})
+        
+        print(f"init_client(): Sender IDs: {len(sender_ids)}", flush=True)
+        print(f"init_client(): Sender names: {len(sender_names)}", flush=True)
+        print(f"init_client(): Client groups: {len(client_groups)}", flush=True)
+        
+        # Convert sender_names keys to integers if they're strings
+        if sender_names:
+            processed_sender_names = {}
+            for key, value in sender_names.items():
+                try:
+                    key_int = int(key) if isinstance(key, str) else key
+                    processed_sender_names[key_int] = value
+                except (ValueError, TypeError):
+                    processed_sender_names[key] = value
+            sender_names = processed_sender_names
+        
+        if not api_key:
+            error_msg = "HeyReach API key not found in config.yaml or environment variables"
+            print(f"init_client(): ERROR - {error_msg}", flush=True)
+            logger.error(error_msg)
+            logger.error("Please set HEYREACH_API_KEY environment variable")
+            return False
+        
+        print("init_client(): Creating HeyReachClient instance...", flush=True)
+        try:
+            heyreach_client = HeyReachClient(
+                api_key=api_key, 
+                base_url=base_url,
+                sender_ids=sender_ids,
+                sender_names=sender_names,
+                client_groups=client_groups
+            )
+            print("init_client(): ✅ HeyReachClient created successfully!", flush=True)
+            logger.info("✅ HeyReach client initialized successfully")
+            if sender_ids:
+                logger.info(f"📋 Using {len(sender_ids)} manually configured sender IDs")
+                print(f"init_client(): Using {len(sender_ids)} sender IDs", flush=True)
+            if client_groups:
+                logger.info(f"📦 Loaded {len(client_groups)} client groups")
+                print(f"init_client(): Loaded {len(client_groups)} client groups", flush=True)
+            return True
+        except Exception as client_error:
+            error_msg = f"Error creating HeyReachClient: {client_error}"
+            print(f"init_client(): EXCEPTION - {error_msg}", flush=True)
+            import traceback
+            traceback_str = traceback.format_exc()
+            print(f"init_client(): TRACEBACK:\n{traceback_str}", flush=True)
+            logger.error(error_msg)
+            logger.error(traceback_str)
+            return False
     except Exception as e:
-        logger.error(f"Error initializing HeyReach client: {e}")
+        error_msg = f"Error in init_client(): {e}"
+        print(f"init_client(): OUTER EXCEPTION - {error_msg}", flush=True)
         import traceback
-        traceback.print_exc()
+        traceback_str = traceback.format_exc()
+        print(f"init_client(): TRACEBACK:\n{traceback_str}", flush=True)
+        logger.error(error_msg)
+        logger.error(traceback_str)
         return False
 
 
