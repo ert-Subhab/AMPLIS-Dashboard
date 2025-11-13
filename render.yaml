@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: heyreach-dashboard
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: HEYREACH_API_KEY
+        sync: false  # Set this in Render dashboard
+      - key: HEYREACH_BASE_URL
+        value: https://api.heyreach.io
+        sync: false
+      - key: HEYREACH_SENDER_IDS
+        sync: false  # Optional: JSON array string, e.g., "[50083, 50084]"
+      - key: HEYREACH_SENDER_NAMES
+        sync: false  # Optional: JSON object string, e.g., '{"50083": "Name"}'
+      - key: HEYREACH_CLIENT_GROUPS
+        sync: false  # Optional: JSON object string for client groups
+
