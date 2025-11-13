@@ -30,31 +30,55 @@ def initialize_app():
     """Initialize the HeyReach client when the app starts"""
     global heyreach_client
     try:
+        # Use print() to ensure logs are visible in Render
+        print("=" * 50, flush=True)
+        print("INITIALIZING HEYREACH CLIENT ON APP STARTUP", flush=True)
+        print("=" * 50, flush=True)
+        
+        api_key_present = bool(os.environ.get('HEYREACH_API_KEY'))
+        base_url = os.environ.get('HEYREACH_BASE_URL', 'Not set')
+        
+        print(f"HEYREACH_API_KEY present: {api_key_present}", flush=True)
+        print(f"HEYREACH_BASE_URL: {base_url}", flush=True)
+        
         logger.info("=" * 50)
         logger.info("Initializing HeyReach client on app startup...")
-        logger.info(f"HEYREACH_API_KEY present: {bool(os.environ.get('HEYREACH_API_KEY'))}")
-        logger.info(f"HEYREACH_BASE_URL: {os.environ.get('HEYREACH_BASE_URL', 'Not set')}")
+        logger.info(f"HEYREACH_API_KEY present: {api_key_present}")
+        logger.info(f"HEYREACH_BASE_URL: {base_url}")
         
         if not heyreach_client:
+            print("Client not initialized yet, calling init_client()...", flush=True)
             if not init_client():
+                print("=" * 50, flush=True)
+                print("CRITICAL: Failed to initialize HeyReach client!", flush=True)
+                print("Check environment variables: HEYREACH_API_KEY and HEYREACH_BASE_URL", flush=True)
+                print("=" * 50, flush=True)
                 logger.error("=" * 50)
                 logger.error("CRITICAL: Failed to initialize HeyReach client on app startup")
                 logger.error("The dashboard will not function without a valid client.")
                 logger.error("Check environment variables: HEYREACH_API_KEY and HEYREACH_BASE_URL")
                 logger.error("=" * 50)
             else:
+                print("=" * 50, flush=True)
+                print("✅ HeyReach client initialized successfully!", flush=True)
+                print("=" * 50, flush=True)
                 logger.info("=" * 50)
                 logger.info("✅ HeyReach client initialized successfully on app startup")
                 logger.info("=" * 50)
         else:
+            print("HeyReach client already initialized", flush=True)
             logger.info("HeyReach client already initialized")
     except Exception as e:
-        logger.error(f"Exception during app initialization: {e}")
+        print(f"EXCEPTION during app initialization: {e}", flush=True)
         import traceback
+        print(traceback.format_exc(), flush=True)
+        logger.error(f"Exception during app initialization: {e}")
         logger.error(traceback.format_exc())
 
 # Initialize client when app is imported (for gunicorn)
+print("APP.PY: Starting initialization...", flush=True)
 initialize_app()
+print("APP.PY: Initialization complete.", flush=True)
 
 
 def load_config():
@@ -233,7 +257,17 @@ def get_performance():
     """Get performance data for selected sender and date range"""
     try:
         if not heyreach_client:
-            return jsonify({'error': 'HeyReach client not initialized'}), 500
+            error_msg = 'HeyReach client not initialized. Check /api/health for details.'
+            logger.error(error_msg)
+            print(f"ERROR: {error_msg}", flush=True)
+            # Return empty data structure instead of error to allow dashboard to display
+            return jsonify({
+                'error': error_msg,
+                'start_date': request.args.get('start_date', ''),
+                'end_date': request.args.get('end_date', ''),
+                'senders': {},
+                'clients': {}
+            }), 200
         
         # Get query parameters
         sender_id = request.args.get('sender_id', 'all')
@@ -363,23 +397,47 @@ def get_summary():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - shows initialization status"""
     try:
-        if not heyreach_client:
-            return jsonify({'status': 'error', 'message': 'Client not initialized'}), 500
+        # Check environment variables
+        api_key_set = bool(os.environ.get('HEYREACH_API_KEY'))
+        base_url_set = os.environ.get('HEYREACH_BASE_URL', 'Not set')
         
-        # Test connection by getting accounts
-        accounts = heyreach_client.get_linkedin_accounts()
-        is_connected = len(accounts) >= 0  # If we get a response (even empty), we're connected
+        health_status = {
+            'status': 'healthy' if heyreach_client else 'unhealthy',
+            'client_initialized': bool(heyreach_client),
+            'api_key_set': api_key_set,
+            'base_url': base_url_set,
+            'config_source': 'environment' if api_key_set else 'config.yaml'
+        }
         
-        return jsonify({
-            'status': 'healthy' if is_connected else 'unhealthy',
-            'connected': is_connected,
-            'accounts_found': len(accounts)
-        })
+        if heyreach_client:
+            # Test connection by getting accounts
+            try:
+                accounts = heyreach_client.get_linkedin_accounts()
+                health_status['connected'] = True
+                health_status['accounts_found'] = len(accounts) if accounts else 0
+                health_status['status'] = 'healthy'
+            except Exception as e:
+                health_status['connected'] = False
+                health_status['error'] = str(e)
+                health_status['status'] = 'error'
+        else:
+            health_status['error'] = 'HeyReach client not initialized'
+            health_status['connected'] = False
+        
+        status_code = 200 if health_status['status'] == 'healthy' else 500
+        return jsonify(health_status), status_code
     except Exception as e:
         logger.error(f"Health check error: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'status': 'error', 
+            'message': str(e),
+            'client_initialized': bool(heyreach_client),
+            'api_key_set': bool(os.environ.get('HEYREACH_API_KEY'))
+        }), 500
 
 
 if __name__ == '__main__':
