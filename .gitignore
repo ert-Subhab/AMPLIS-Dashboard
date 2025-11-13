@@ -33,9 +33,12 @@ google_credentials.json
 
 # Reports
 reports/
-*.html
+reports/*.html
 *.csv
 *.xlsx
+
+# Allow HTML templates (needed for Flask)
+!templates/*.html
 
 # IDE
 .vscode/

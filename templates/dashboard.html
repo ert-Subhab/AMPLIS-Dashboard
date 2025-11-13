@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HeyReach Performance Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <h1>HeyReach Performance Tracker</h1>
+            <div class="header-controls">
+                <button id="refreshBtn" class="btn btn-primary">Refresh Data</button>
+            </div>
+        </header>
+
+        <!-- Filters -->
+        <div class="filters-section">
+            <div class="filter-group">
+                <label for="senderSelect">Select Sender:</label>
+                <select id="senderSelect" class="filter-input">
+                    <option value="all">All</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="startDate">Start Date:</label>
+                <input type="date" id="startDate" class="filter-input">
+            </div>
+            <div class="filter-group">
+                <label for="endDate">End Date:</label>
+                <input type="date" id="endDate" class="filter-input">
+            </div>
+            <div class="filter-group">
+                <button id="applyFiltersBtn" class="btn btn-primary">Apply Filters</button>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="summary-section" id="summarySection">
+            <div class="summary-card">
+                <h3>Connections Sent</h3>
+                <p class="summary-value" id="totalConnectionsSent">0</p>
+            </div>
+            <div class="summary-card">
+                <h3>Connections Accepted</h3>
+                <p class="summary-value" id="totalConnectionsAccepted">0</p>
+            </div>
+            <div class="summary-card">
+                <h3>Acceptance Rate</h3>
+                <p class="summary-value" id="acceptanceRate">0%</p>
+            </div>
+            <div class="summary-card">
+                <h3>Messages Sent</h3>
+                <p class="summary-value" id="totalMessagesSent">0</p>
+            </div>
+            <div class="summary-card">
+                <h3>Message Replies</h3>
+                <p class="summary-value" id="totalMessageReplies">0</p>
+            </div>
+            <div class="summary-card">
+                <h3>Reply Rate</h3>
+                <p class="summary-value" id="replyRate">0%</p>
+            </div>
+            <div class="summary-card">
+                <h3>Open Conversations</h3>
+                <p class="summary-value" id="totalOpenConversations">0</p>
+            </div>
+            <div class="summary-card">
+                <h3>Interested</h3>
+                <p class="summary-value" id="totalInterested">0</p>
+            </div>
+        </div>
+
+        <!-- Performance Tables -->
+        <div class="performance-section" id="performanceSection">
+            <!-- Tables will be generated dynamically -->
+        </div>
+
+        <!-- Charts Section -->
+        <div class="charts-section">
+            <div class="chart-container">
+                <h2>Performance Trends</h2>
+                <canvas id="performanceChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="loading-indicator" style="display: none;">
+            <div class="spinner"></div>
+            <p>Loading data...</p>
+        </div>
+
+        <!-- Error Message -->
+        <div id="errorMessage" class="error-message" style="display: none;">
+            <p id="errorText"></p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
