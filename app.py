@@ -25,6 +25,37 @@ CORS(app)
 # Global client instance
 heyreach_client = None
 
+# Initialize client when app starts (for production deployment with gunicorn)
+def initialize_app():
+    """Initialize the HeyReach client when the app starts"""
+    global heyreach_client
+    try:
+        logger.info("=" * 50)
+        logger.info("Initializing HeyReach client on app startup...")
+        logger.info(f"HEYREACH_API_KEY present: {bool(os.environ.get('HEYREACH_API_KEY'))}")
+        logger.info(f"HEYREACH_BASE_URL: {os.environ.get('HEYREACH_BASE_URL', 'Not set')}")
+        
+        if not heyreach_client:
+            if not init_client():
+                logger.error("=" * 50)
+                logger.error("CRITICAL: Failed to initialize HeyReach client on app startup")
+                logger.error("The dashboard will not function without a valid client.")
+                logger.error("Check environment variables: HEYREACH_API_KEY and HEYREACH_BASE_URL")
+                logger.error("=" * 50)
+            else:
+                logger.info("=" * 50)
+                logger.info("✅ HeyReach client initialized successfully on app startup")
+                logger.info("=" * 50)
+        else:
+            logger.info("HeyReach client already initialized")
+    except Exception as e:
+        logger.error(f"Exception during app initialization: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+# Initialize client when app is imported (for gunicorn)
+initialize_app()
+
 
 def load_config():
     """Load configuration from environment variables (production) or config.yaml (local)"""
@@ -130,7 +161,8 @@ def init_client():
         sender_names = processed_sender_names
     
     if not api_key:
-        logger.error("HeyReach API key not found in config.yaml")
+        logger.error("HeyReach API key not found in config.yaml or environment variables")
+        logger.error("Please set HEYREACH_API_KEY environment variable")
         return False
     
     try:
@@ -165,24 +197,35 @@ def get_senders():
     """Get list of all senders (LinkedIn accounts)"""
     try:
         if not heyreach_client:
-            return jsonify({'error': 'HeyReach client not initialized'}), 500
+            error_msg = 'HeyReach client not initialized. Check environment variables and logs.'
+            logger.error(error_msg)
+            return jsonify({'error': error_msg, 'senders': [{'id': 'all', 'name': 'All'}]}), 200
         
         accounts = heyreach_client.get_linkedin_accounts()
+        if not accounts:
+            logger.warning("No LinkedIn accounts returned from API")
+            # Return at least "All" option
+            return jsonify({'senders': [{'id': 'all', 'name': 'All'}], 'warning': 'No senders found'}), 200
+        
         senders = [
             {
                 'id': acc.get('id'),
                 'name': acc.get('linkedInUserListName', 'Unknown')
             }
-            for acc in accounts
+            for acc in accounts if acc.get('id')
         ]
         
         # Add "All" option
         senders.insert(0, {'id': 'all', 'name': 'All'})
         
+        logger.info(f"Returning {len(senders)} senders")
         return jsonify({'senders': senders})
     except Exception as e:
         logger.error(f"Error fetching senders: {e}")
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        logger.error(traceback.format_exc())
+        # Return at least "All" option even on error
+        return jsonify({'error': str(e), 'senders': [{'id': 'all', 'name': 'All'}]}), 200
 
 
 @app.route('/api/performance', methods=['GET'])
