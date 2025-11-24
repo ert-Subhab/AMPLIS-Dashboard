@@ -896,18 +896,34 @@ def send_to_apps_script():
         if not performance_data or not performance_data.get('senders'):
             return jsonify({'error': 'No data available for the selected date range'}), 400
         
-        # Format data for Apps Script
+        # Get sender_names mapping from session
+        sender_names = session.get('sender_names', {})
+        
+        # Format data for Apps Script with sender IDs
         formatted_data = {
             'date_range': {
                 'start': start_date,
                 'end': end_date
             },
-            'senders': []
+            'senders': [],
+            'sender_id_mapping': {}  # Map sender names to IDs for matching
         }
         
+        # Build reverse mapping: name -> ID
+        for sender_id, name in sender_names.items():
+            formatted_data['sender_id_mapping'][name] = sender_id
+        
         for sender_name, weeks_data in performance_data.get('senders', {}).items():
+            # Find sender ID from mapping
+            sender_id = None
+            for mapped_name, mapped_id in formatted_data['sender_id_mapping'].items():
+                if mapped_name.lower() == sender_name.lower() or sender_name.lower() in mapped_name.lower():
+                    sender_id = mapped_id
+                    break
+            
             sender_data = {
                 'name': sender_name,
+                'sender_id': sender_id,
                 'weeks': weeks_data
             }
             formatted_data['senders'].append(sender_data)
