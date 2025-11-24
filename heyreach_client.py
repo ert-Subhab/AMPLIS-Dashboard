@@ -1344,9 +1344,12 @@ class HeyReachClient:
             result['clients'][client_name] = {}
             
             for sender_name, weekly_data in client_senders.items():
-                result['clients'][client_name][sender_name] = format_weeks_data(weekly_data)
+                formatted_weeks = format_weeks_data(weekly_data)
+                result['clients'][client_name][sender_name] = formatted_weeks
                 # Also add to main senders dict for backward compatibility
-                result['senders'][sender_name] = format_weeks_data(weekly_data)
+                # Only add if not already present (to avoid duplicates)
+                if sender_name not in result['senders']:
+                    result['senders'][sender_name] = formatted_weeks
         
         # Process senders without a client
         for sender_name, weekly_data in senders_without_client:
