@@ -25,12 +25,31 @@ async function initializeDashboard() {
         document.getElementById('toggleApiKeyBtn').addEventListener('click', toggleApiKeyVisibility);
         document.getElementById('applyFiltersBtn').addEventListener('click', loadPerformanceData);
         document.getElementById('refreshBtn').addEventListener('click', loadPerformanceData);
-        document.getElementById('populateSheetsBtn').addEventListener('click', populateSheets);
-        document.getElementById('connectGoogleBtn').addEventListener('click', connectGoogleSheets);
-        document.getElementById('disconnectGoogleBtn').addEventListener('click', disconnectGoogleSheets);
+        
+        // Google Sheets event listeners (only if elements exist)
+        const populateBtn = document.getElementById('populateSheetsBtn');
+        const connectGoogleBtn = document.getElementById('connectGoogleBtn');
+        const disconnectGoogleBtn = document.getElementById('disconnectGoogleBtn');
+        
+        if (populateBtn) populateBtn.addEventListener('click', populateSheets);
+        if (connectGoogleBtn) connectGoogleBtn.addEventListener('click', connectGoogleSheets);
+        if (disconnectGoogleBtn) disconnectGoogleBtn.addEventListener('click', disconnectGoogleSheets);
         
         // Check Google Sheets connection status on load
         checkGoogleSheetsStatus();
+        
+        // Check for OAuth callback success/error
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('google_connected') === '1') {
+            showMessage('Google Sheets connected successfully!');
+            checkGoogleSheetsStatus();
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (urlParams.get('google_error') === '1') {
+            showError('Failed to connect Google Sheets. Please try again.');
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
         
         // Allow Enter key to submit API key
         document.getElementById('apiKeyInput').addEventListener('keypress', function(e) {
