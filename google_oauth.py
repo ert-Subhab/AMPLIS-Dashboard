@@ -156,6 +156,11 @@ def get_stored_credentials():
     return creds
 
 
+def is_configured():
+    """Check if OAuth credentials are configured"""
+    return bool(CLIENT_ID and CLIENT_SECRET)
+
+
 def is_authorized():
     """Check if user has authorized Google Sheets access"""
     return 'google_oauth_token' in session

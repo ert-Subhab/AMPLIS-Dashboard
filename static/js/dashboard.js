@@ -628,16 +628,54 @@ async function checkGoogleSheetsStatus() {
         const response = await fetch('/api/google/status');
         const data = await response.json();
         
-        if (data.authorized) {
-            document.getElementById('googleNotConnected').style.display = 'none';
-            document.getElementById('googleConnected').style.display = 'block';
-            document.getElementById('sheetsUrlGroup').style.display = 'block';
-            document.getElementById('populateGroup').style.display = 'block';
+        const notConnectedDiv = document.getElementById('googleNotConnected');
+        const connectedDiv = document.getElementById('googleConnected');
+        const sheetsUrlGroup = document.getElementById('sheetsUrlGroup');
+        const populateGroup = document.getElementById('populateGroup');
+        
+        if (!data.configured) {
+            // OAuth not configured - show message to user
+            notConnectedDiv.style.display = 'block';
+            connectedDiv.style.display = 'none';
+            sheetsUrlGroup.style.display = 'none';
+            populateGroup.style.display = 'none';
+            
+            // Update message
+            const message = notConnectedDiv.querySelector('p') || notConnectedDiv;
+            if (message.tagName === 'P') {
+                message.textContent = 'Google Sheets integration is not configured. This feature requires administrator setup.';
+                message.style.color = '#dc3545';
+            }
+            
+            // Hide or disable connect button
+            const connectBtn = document.getElementById('connectGoogleBtn');
+            if (connectBtn) {
+                connectBtn.disabled = true;
+                connectBtn.textContent = 'Not Available';
+                connectBtn.style.opacity = '0.6';
+                connectBtn.style.cursor = 'not-allowed';
+            }
+        } else if (data.authorized) {
+            // User is authorized
+            notConnectedDiv.style.display = 'none';
+            connectedDiv.style.display = 'block';
+            sheetsUrlGroup.style.display = 'block';
+            populateGroup.style.display = 'block';
         } else {
-            document.getElementById('googleNotConnected').style.display = 'block';
-            document.getElementById('googleConnected').style.display = 'none';
-            document.getElementById('sheetsUrlGroup').style.display = 'none';
-            document.getElementById('populateGroup').style.display = 'none';
+            // OAuth configured but user not authorized
+            notConnectedDiv.style.display = 'block';
+            connectedDiv.style.display = 'none';
+            sheetsUrlGroup.style.display = 'none';
+            populateGroup.style.display = 'none';
+            
+            // Reset connect button
+            const connectBtn = document.getElementById('connectGoogleBtn');
+            if (connectBtn) {
+                connectBtn.disabled = false;
+                connectBtn.textContent = 'Connect Google Sheets';
+                connectBtn.style.opacity = '1';
+                connectBtn.style.cursor = 'pointer';
+            }
         }
     } catch (error) {
         console.error('Error checking Google Sheets status:', error);
@@ -654,7 +692,18 @@ async function connectGoogleSheets() {
         const response = await fetch('/api/google/authorize');
         const data = await response.json();
         
-        if (!response.ok || data.error) {
+        if (!response.ok) {
+            if (response.status === 503 || !data.configured) {
+                // OAuth not configured
+                showError('Google Sheets integration is not configured. Please contact the administrator to set up OAuth credentials.');
+            } else {
+                throw new Error(data.error || 'Failed to initiate Google authorization');
+            }
+            showLoading(false);
+            return;
+        }
+        
+        if (data.error) {
             throw new Error(data.error || 'Failed to initiate Google authorization');
         }
         

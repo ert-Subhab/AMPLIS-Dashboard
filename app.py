@@ -14,7 +14,7 @@ from heyreach_client import HeyReachClient
 from sheets_client import SheetsClient
 from google_oauth import (
     get_authorization_url, handle_oauth_callback, 
-    get_stored_credentials, is_authorized, revoke_authorization
+    get_stored_credentials, is_authorized, revoke_authorization, is_configured
 )
 import secrets
 
@@ -648,6 +648,14 @@ def get_summary():
 def google_authorize():
     """Initiate Google OAuth authorization"""
     try:
+        # Check if OAuth is configured
+        if not is_configured():
+            return jsonify({
+                'error': 'Google Sheets integration is not configured',
+                'configured': False,
+                'message': 'OAuth credentials are not set up. Please contact the administrator to configure Google Sheets integration.'
+            }), 503  # Service Unavailable
+        
         # Get redirect URI from request or use default
         redirect_uri = request.args.get('redirect_uri') or request.url_root.rstrip('/') + '/api/google/callback'
         
@@ -655,7 +663,10 @@ def google_authorize():
         return jsonify({'authorization_url': authorization_url})
     except Exception as e:
         logger.error(f"Error initiating OAuth: {e}")
-        return jsonify({'error': f'Failed to initiate Google authorization: {str(e)}'}), 500
+        return jsonify({
+            'error': f'Failed to initiate Google authorization: {str(e)}',
+            'configured': is_configured()
+        }), 500
 
 
 @app.route('/api/google/callback', methods=['GET'])
@@ -680,9 +691,21 @@ def google_callback():
 @app.route('/api/google/status', methods=['GET'])
 def google_status():
     """Check Google Sheets authorization status"""
+    configured = is_configured()
+    authorized = is_authorized() if configured else False
+    
+    if not configured:
+        return jsonify({
+            'authorized': False,
+            'configured': False,
+            'message': 'Google Sheets integration not configured. Please contact the administrator.',
+            'error': 'OAuth credentials not set up'
+        })
+    
     return jsonify({
-        'authorized': is_authorized(),
-        'message': 'Google Sheets connected' if is_authorized() else 'Not connected'
+        'authorized': authorized,
+        'configured': True,
+        'message': 'Google Sheets connected' if authorized else 'Not connected'
     })
 
 
