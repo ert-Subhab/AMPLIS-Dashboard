@@ -998,7 +998,7 @@ class HeyReachClient:
                             aggregated['totalInmailReplies'] += int(day_stats.get('totalInmailReplies', 0) or 0)
                             aggregated['inmailMessagesSent'] += int(day_stats.get('inmailMessagesSent', 0) or 0)
                     
-                    logger.info(f"Aggregated stats from {days_counted} days in byDayStats: connectionsSent={aggregated['connectionsSent']}, connectionsAccepted={aggregated['connectionsAccepted']}, messagesSent={aggregated['messagesSent']}, totalMessageReplies={aggregated['totalMessageReplies']}, totalMessageStarted={aggregated['totalMessageStarted']}")
+                    logger.info(f"Aggregated stats from {days_counted} days in byDayStats: connectionsSent={aggregated['connectionsSent']}, connectionsAccepted={aggregated['connectionsAccepted']}, totalMessageStarted={aggregated['totalMessageStarted']} (messages_sent), totalMessageReplies={aggregated['totalMessageReplies']}")
                     data = aggregated
                 # Try other nested structures as fallback
                 elif 'data' in data and isinstance(data['data'], dict):
