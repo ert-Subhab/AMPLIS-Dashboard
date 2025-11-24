@@ -241,7 +241,7 @@ function populateSenderData(sheet, senderInfo, weeks, dateRange) {
     
     // Populate data for each week
     for (const week of weeks) {
-      const weekKey = formatWeekDate(week.week_start || week.week_end);
+      const weekKey = formatWeekDate(week.week_end || week.week_start);
       const weekCol = weekColumns[weekKey];
       
       if (!weekCol) continue;
