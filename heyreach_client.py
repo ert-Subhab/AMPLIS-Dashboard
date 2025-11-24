@@ -359,20 +359,37 @@ class HeyReachClient:
                     "offset": 0,
                     "limit": 100
                 })
+                items = None
                 if data and isinstance(data, dict):
                     if 'items' in data:
                         items = data.get('items', [])
-                        if items:
-                            logger.info(f"✅ Successfully fetched {len(items)} accounts from cached endpoint")
-                            return items
                     elif 'data' in data:
                         items = data.get('data', [])
-                        if items:
-                            logger.info(f"✅ Successfully fetched {len(items)} accounts from cached endpoint")
-                            return items
                 elif isinstance(data, list) and len(data) > 0:
-                    logger.info(f"✅ Successfully fetched {len(data)} accounts from cached endpoint")
-                    return data
+                    items = data
+                
+                if items:
+                    logger.info(f"✅ Successfully fetched {len(items)} accounts from cached endpoint")
+                    # Map account IDs to names from config.yaml
+                    mapped_accounts = []
+                    for account in items:
+                        account_id = account.get('id')
+                        if account_id:
+                            # Convert account_id to int for lookup
+                            account_id_int = int(account_id) if account_id and isinstance(account_id, (str, float)) else account_id
+                            # Get name from config.yaml if available
+                            mapped_name = (
+                                self.manual_sender_names.get(account_id_int) or 
+                                self.manual_sender_names.get(account_id) or
+                                account.get('linkedInUserListName') or 
+                                account.get('name') or 
+                                f'Sender {account_id}'
+                            )
+                            # Update account with mapped name
+                            account['linkedInUserListName'] = mapped_name
+                            account['name'] = mapped_name
+                        mapped_accounts.append(account)
+                    return mapped_accounts
             except Exception as e:
                 logger.debug(f"Cached endpoint failed: {e}")
                 # Remove from cache and try other endpoints
