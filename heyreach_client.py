@@ -829,7 +829,7 @@ class HeyReachClient:
                         'acceptedInvites', 'totalConnectionsAccepted'
                     ),
                     'messages_sent': get_field_value(
-                        stats, 'messagesSent', 'sentMessages', 'totalMessagesSent', 'messages'
+                        stats, 'totalMessageStarted', 'messagesSent', 'sentMessages', 'totalMessagesSent', 'messages'
                     ),
                     'message_replies': get_field_value(
                         stats, 'repliesReceived', 'replies', 'messageReplies', 
@@ -1310,7 +1310,8 @@ class HeyReachClient:
                     
                     week_data['messages_sent'] = get_field_value(
                         stats, 
-                        'messagesSent',  # HeyReach API field name
+                        'totalMessageStarted',  # Use totalMessageStarted for messages sent (as per user requirement)
+                        'messagesSent',  # Fallback to messagesSent if totalMessageStarted not available
                         'sentMessages', 'totalMessagesSent', 'messages',
                         'messageCount', 'totalMessages', 'messagesSentCount'
                     )
@@ -1322,12 +1323,14 @@ class HeyReachClient:
                         'totalReplies', 'repliesCount', 'replyCount'
                     )
                     
-                    # totalMessageStarted represents open conversations (conversations started)
+                    # Note: totalMessageStarted is now used for messages_sent
+                    # For open_conversations, we need to find a different field or calculate it
+                    # Open conversations might be messagesSent - totalMessageReplies, or a separate field
                     week_data['open_conversations'] = get_field_value(
                         stats, 
-                        'totalMessageStarted',  # HeyReach API field name
                         'openConversations', 'activeConversations', 
-                        'conversations', 'activeChats', 'messageStarted'
+                        'conversations', 'activeChats', 'messageStarted',
+                        'totalMessageStarted'  # Fallback if no other field available
                     )
                     
                     # Note: HeyReach API doesn't seem to have explicit "interested" or "leads_not_enrolled" fields
