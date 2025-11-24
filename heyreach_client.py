@@ -322,16 +322,21 @@ class HeyReachClient:
         logger.info("Fetching messages data...")
         return self._make_request("messages", params=params)
     
-    def get_linkedin_accounts(self) -> List[Dict]:
+    def get_linkedin_accounts(self, force_api: bool = False) -> List[Dict]:
         """
         Get all LinkedIn accounts (senders)
+        
+        Args:
+            force_api: If True, always fetch from API even if manual sender IDs are configured
         
         Returns:
             List of LinkedIn account dictionaries
         """
-        # If we have manually configured sender IDs, return them as accounts
-        if self.manual_sender_ids:
-            logger.debug("Using manually configured sender IDs instead of API")
+        # If force_api is False, prioritize manually configured sender IDs if available
+        # This allows using config.yaml sender IDs when appropriate
+        # But when force_api=True (e.g., when user enters API key), always fetch from API
+        if not force_api and self.manual_sender_ids is not None and len(self.manual_sender_ids) > 0:
+            logger.info(f"Using {len(self.manual_sender_ids)} manually configured sender IDs instead of API")
             accounts = []
             for sender_id in self.manual_sender_ids:
                 sender_name = self.manual_sender_names.get(sender_id, f'Sender {sender_id}')
@@ -340,6 +345,7 @@ class HeyReachClient:
                     'linkedInUserListName': sender_name,
                     'name': sender_name
                 })
+            logger.info(f"[OK] Returning {len(accounts)} senders from manual configuration")
             return accounts
         
         logger.info("Fetching LinkedIn accounts from API...")
@@ -355,10 +361,17 @@ class HeyReachClient:
                 })
                 if data and isinstance(data, dict):
                     if 'items' in data:
-                        return data.get('items', [])
+                        items = data.get('items', [])
+                        if items:
+                            logger.info(f"✅ Successfully fetched {len(items)} accounts from cached endpoint")
+                            return items
                     elif 'data' in data:
-                        return data.get('data', [])
-                elif isinstance(data, list):
+                        items = data.get('data', [])
+                        if items:
+                            logger.info(f"✅ Successfully fetched {len(items)} accounts from cached endpoint")
+                            return items
+                elif isinstance(data, list) and len(data) > 0:
+                    logger.info(f"✅ Successfully fetched {len(data)} accounts from cached endpoint")
                     return data
             except Exception as e:
                 logger.debug(f"Cached endpoint failed: {e}")
@@ -366,7 +379,9 @@ class HeyReachClient:
                 del self.working_endpoints['linkedin_accounts']
         
         # Try a limited set of endpoint variations (reduce logging spam)
+        # User specified the correct endpoint: api/public/li_account/GetAll
         endpoints_to_try = [
+            "api/public/li_account/GetAll",  # Correct endpoint as specified by user
             "api/public/linkedin-account/GetAll",
             "api/public/linkedinAccount/GetAll",
             "api/v1/accounts",
@@ -402,17 +417,21 @@ class HeyReachClient:
                     if data and isinstance(data, dict):
                         # Check for different response structures
                         if 'items' in data:
-                            logger.info(f"✅ Successfully fetched accounts from: {endpoint}")
-                            self.working_endpoints['linkedin_accounts'] = endpoint
-                            self.headers = headers
-                            return data.get('items', [])
+                            items = data.get('items', [])
+                            if items:
+                                logger.info(f"✅ Successfully fetched {len(items)} accounts from: {endpoint}")
+                                self.working_endpoints['linkedin_accounts'] = endpoint
+                                self.headers = headers
+                                return items
                         elif 'data' in data:
-                            logger.info(f"✅ Successfully fetched accounts from: {endpoint}")
-                            self.working_endpoints['linkedin_accounts'] = endpoint
-                            self.headers = headers
-                            return data.get('data', [])
-                    elif isinstance(data, list) and len(data) >= 0:
-                        logger.info(f"✅ Successfully fetched accounts from: {endpoint}")
+                            items = data.get('data', [])
+                            if items:
+                                logger.info(f"✅ Successfully fetched {len(items)} accounts from: {endpoint}")
+                                self.working_endpoints['linkedin_accounts'] = endpoint
+                                self.headers = headers
+                                return items
+                    elif isinstance(data, list) and len(data) > 0:
+                        logger.info(f"✅ Successfully fetched {len(data)} accounts from: {endpoint}")
                         self.working_endpoints['linkedin_accounts'] = endpoint
                         self.headers = headers
                         return data
@@ -422,9 +441,23 @@ class HeyReachClient:
                         logger.debug(f"Endpoint {endpoint} failed: {str(e)[:100]}")
                     continue
         
-        # Don't log warning if we have manual sender IDs configured
-        if not self.manual_sender_ids:
-            logger.debug("⚠️ Could not fetch LinkedIn accounts from API (this is OK if you use manual sender IDs)")
+        # If API failed and we don't have manual sender IDs, log warning
+        if not self.manual_sender_ids or len(self.manual_sender_ids) == 0:
+            logger.warning("⚠️ Could not fetch LinkedIn accounts from API and no manual sender IDs configured")
+            logger.info("💡 Solution: Add sender_ids to config.yaml under heyreach section")
+        else:
+            # Fallback: if API failed but we have manual sender IDs, use them
+            logger.info(f"API call failed, falling back to {len(self.manual_sender_ids)} manually configured sender IDs")
+            accounts = []
+            for sender_id in self.manual_sender_ids:
+                sender_name = self.manual_sender_names.get(sender_id, f'Sender {sender_id}')
+                accounts.append({
+                    'id': sender_id,
+                    'linkedInUserListName': sender_name,
+                    'name': sender_name
+                })
+            return accounts
+        
         return []
     
     def get_summary_metrics(self, days_back: int = 7) -> Dict:
@@ -832,11 +865,12 @@ class HeyReachClient:
         
         logger.debug(f"Request data: accountIds={processed_account_ids}, startDate={start_date}, endDate={end_date}")
         
-        # Set headers - try Accept: application/json first (more likely to return JSON)
+        # Set headers according to HeyReach API documentation
+        # The API documentation specifies Accept: text/plain
         headers = {
             "X-API-KEY": self.api_key,
             "Content-Type": "application/json",
-            "Accept": "application/json"  # Changed from text/plain to application/json
+            "Accept": "text/plain"  # API docs specify text/plain
         }
         
         try:
@@ -948,20 +982,13 @@ class HeyReachClient:
         else:
             start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
         
-        # Get LinkedIn accounts - try API first, then fall back to manual config
+        # ALWAYS prioritize manually configured sender IDs if available
+        # This ensures we use the sender IDs from config.yaml or environment variables
         linkedin_accounts = []
         
-        # Try to get accounts from API (but don't fail if it doesn't work)
-        try:
-            linkedin_accounts = self.get_linkedin_accounts()
-            if linkedin_accounts:
-                logger.info(f"✅ Found {len(linkedin_accounts)} LinkedIn accounts from API")
-        except Exception as e:
-            logger.debug(f"Could not fetch accounts from API: {e}")
-        
-        # If API didn't work, use manually configured sender IDs
-        if not linkedin_accounts and self.manual_sender_ids:
-            logger.info(f"📋 Using manually configured sender IDs: {self.manual_sender_ids}")
+        # Use manually configured sender IDs if available (priority)
+        if self.manual_sender_ids and len(self.manual_sender_ids) > 0:
+            logger.info(f"Using {len(self.manual_sender_ids)} manually configured sender IDs")
             for sender_id_val in self.manual_sender_ids:
                 sender_name = self.manual_sender_names.get(sender_id_val, f'Sender {sender_id_val}')
                 linkedin_accounts.append({
@@ -969,11 +996,21 @@ class HeyReachClient:
                     'linkedInUserListName': sender_name,
                     'name': sender_name
                 })
+            logger.info(f"Loaded {len(linkedin_accounts)} senders from manual configuration")
+        else:
+            # Fallback: try API if no manual config
+            try:
+                # Force API fetch when getting performance data
+                linkedin_accounts = self.get_linkedin_accounts(force_api=True)
+                if linkedin_accounts:
+                    logger.info(f"Found {len(linkedin_accounts)} LinkedIn accounts from API")
+            except Exception as e:
+                logger.debug(f"Could not fetch accounts from API: {e}")
         
-        # If no accounts from API and no manual config, but sender_id is provided, use it directly
+        # Handle case where no accounts found
         if not linkedin_accounts:
             if sender_id and sender_id != 'all':
-                logger.info(f"📋 Using provided sender_id: {sender_id}")
+                logger.info(f"Using provided sender_id: {sender_id}")
                 try:
                     sender_id_int = int(sender_id)
                     sender_name = self.manual_sender_names.get(sender_id_int, f'Sender {sender_id}')
@@ -983,58 +1020,26 @@ class HeyReachClient:
                         'name': sender_name
                     }]
                 except (ValueError, TypeError):
-                    logger.warning(f"⚠️ Invalid sender_id format: {sender_id}")
+                    logger.warning(f"Invalid sender_id format: {sender_id}")
                     return {
                         'start_date': start_date_obj.strftime('%Y-%m-%d'),
                         'end_date': end_date_obj.strftime('%Y-%m-%d'),
                         'senders': {}
                     }
-            elif sender_id == 'all' or not sender_id:
-                # Try to get aggregated stats for all senders
-                logger.info("📊 Attempting to fetch aggregated stats for all senders (accountIds=[])")
-                # We'll handle this case differently - get stats with empty accountIds
-                # But first, let's try to get at least one week of data to see the response structure
-                # For now, return empty result and suggest manual configuration
-                logger.warning("⚠️ No LinkedIn accounts found and no sender_id specified.")
-                logger.info("💡 Solutions:")
-                logger.info("   1. Add sender_ids to config.yaml under heyreach section")
-                logger.info("   2. Or specify a specific sender_id in the dashboard")
-                logger.info("   3. Or the API might support empty accountIds - checking...")
-                
-                # Try getting stats with empty accountIds to see if it works
-                # Generate one week to test
-                weeks = self._generate_weeks(start_date_obj, end_date_obj)
-                if weeks:
-                    test_week = weeks[0]
-                    week_start_iso = test_week['start'].strftime('%Y-%m-%dT00:00:00.000Z')
-                    week_end_iso = test_week['end'].strftime('%Y-%m-%dT23:59:59.999Z')
-                    
-                    logger.info(f"🧪 Testing GetOverallStats with empty accountIds for week {test_week['key']}")
-                    test_stats = self.get_overall_stats(
-                        account_ids=[],  # Empty = all senders
-                        campaign_ids=[],
-                        start_date=week_start_iso,
-                        end_date=week_end_iso
-                    )
-                    
-                    if test_stats:
-                        logger.info("✅ GetOverallStats with empty accountIds works!")
-                        logger.info(f"   Response keys: {list(test_stats.keys()) if isinstance(test_stats, dict) else 'Not a dict'}")
-                        # If it works, we can use it, but we won't have sender breakdown
-                        # Return aggregated stats as a single "All Senders" entry
-                        return self._get_aggregated_stats_for_all_weeks(weeks, start_date_obj, end_date_obj)
-                
+            else:
+                # No accounts and no specific sender_id - return empty
+                logger.warning("No LinkedIn accounts found. Please configure sender_ids in config.yaml or environment variables.")
                 return {
                     'start_date': start_date_obj.strftime('%Y-%m-%d'),
                     'end_date': end_date_obj.strftime('%Y-%m-%d'),
                     'senders': {}
                 }
         
-        # Filter by sender_id if provided
+        # Filter by sender_id if a specific sender is requested (not 'all')
         if sender_id and sender_id != 'all' and linkedin_accounts:
             linkedin_accounts = [acc for acc in linkedin_accounts if str(acc.get('id')) == str(sender_id)]
             if not linkedin_accounts:
-                logger.warning(f"⚠️ Sender ID {sender_id} not found in available accounts")
+                logger.warning(f"Sender ID {sender_id} not found in available accounts")
                 return {
                     'start_date': start_date_obj.strftime('%Y-%m-%d'),
                     'end_date': end_date_obj.strftime('%Y-%m-%d'),
@@ -1104,7 +1109,8 @@ class HeyReachClient:
         # Get stats for each sender and each week
         for account in linkedin_accounts:
             account_id = account.get('id')
-            sender_name = account.get('linkedInUserListName') or account.get('name') or f"Account {account_id}"
+            # Prioritize name from config.yaml (manual_sender_names), then API response
+            sender_name = self.manual_sender_names.get(account_id) or account.get('linkedInUserListName') or account.get('name') or f"Account {account_id}"
             
             logger.info(f"Fetching stats for sender: {sender_name} (ID: {account_id})")
             

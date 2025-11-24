@@ -315,14 +315,36 @@ def initialize_api_key():
         session['heyreach_api_key'] = api_key
         session['heyreach_base_url'] = data.get('base_url', 'https://api.heyreach.io')
         
+        # Load config.yaml to get sender names and client groups mapping
+        config = load_config()
+        sender_names = {}
+        sender_ids = []
+        client_groups = {}
+        
+        if config and 'heyreach' in config:
+            sender_names = config['heyreach'].get('sender_names', {})
+            sender_ids = config['heyreach'].get('sender_ids', [])
+            client_groups = config['heyreach'].get('client_groups', {})
+            logger.info(f"Loaded {len(sender_names)} sender names and {len(client_groups)} client groups from config")
+        
+        # Store in session for later use
+        session['sender_names'] = sender_names
+        session['sender_ids'] = sender_ids
+        session['client_groups'] = client_groups
+        
         # Create a temporary client to test the connection and fetch senders
+        # Pass sender_names and client_groups for mapping, but force API fetch
         temp_client = HeyReachClient(
             api_key=api_key,
-            base_url=session['heyreach_base_url']
+            base_url=session['heyreach_base_url'],
+            sender_ids=[],  # Empty list to force API fetch
+            sender_names=sender_names,  # For mapping IDs to names
+            client_groups=client_groups  # For client grouping
         )
         
-        # Test connection by fetching accounts
-        accounts = temp_client.get_linkedin_accounts()
+        # Test connection by fetching accounts from API
+        # force_api=True ensures we fetch from API, not use manual config
+        accounts = temp_client.get_linkedin_accounts(force_api=True)
         
         if not accounts:
             logger.warning("No LinkedIn accounts returned from API")
@@ -332,18 +354,25 @@ def initialize_api_key():
                 'warning': 'No senders found. API key is valid but no accounts available.'
             }), 200
         
-        senders = [
-            {
-                'id': acc.get('id'),
-                'name': acc.get('linkedInUserListName', acc.get('name', 'Unknown'))
-            }
-            for acc in accounts if acc.get('id')
-        ]
+        # Map API sender IDs to names from config.yaml
+        senders = []
+        for acc in accounts:
+            sender_id = acc.get('id')
+            if not sender_id:
+                continue
+            
+            # Try to get name from config.yaml first, then from API response
+            sender_name = sender_names.get(sender_id) or acc.get('linkedInUserListName') or acc.get('name') or f'Sender {sender_id}'
+            
+            senders.append({
+                'id': sender_id,
+                'name': sender_name
+            })
         
         # Add "All" option
         senders.insert(0, {'id': 'all', 'name': 'All'})
         
-        logger.info(f"Initialized API key and found {len(senders)} senders")
+        logger.info(f"Initialized API key and found {len(senders)} senders (including 'All' option)")
         return jsonify({
             'success': True,
             'senders': senders,
@@ -374,8 +403,18 @@ def get_senders():
         else:
             # Use session API key
             base_url = session.get('heyreach_base_url', 'https://api.heyreach.io')
-            temp_client = HeyReachClient(api_key=api_key, base_url=base_url)
-            accounts = temp_client.get_linkedin_accounts()
+            sender_names = session.get('sender_names', {})
+            sender_ids = session.get('sender_ids', [])
+            client_groups = session.get('client_groups', {})
+            
+            temp_client = HeyReachClient(
+                api_key=api_key,
+                base_url=base_url,
+                sender_ids=[],  # Empty to force API fetch
+                sender_names=sender_names,
+                client_groups=client_groups
+            )
+            accounts = temp_client.get_linkedin_accounts(force_api=True)
         
         if not accounts:
             logger.warning("No LinkedIn accounts returned from API")
@@ -407,7 +446,18 @@ def get_client_for_request():
     
     if api_key:
         base_url = session.get('heyreach_base_url', 'https://api.heyreach.io')
-        return HeyReachClient(api_key=api_key, base_url=base_url)
+        # Get sender mapping from session (loaded from config.yaml during initialization)
+        sender_names = session.get('sender_names', {})
+        sender_ids = session.get('sender_ids', [])
+        client_groups = session.get('client_groups', {})
+        
+        return HeyReachClient(
+            api_key=api_key,
+            base_url=base_url,
+            sender_ids=sender_ids,
+            sender_names=sender_names,
+            client_groups=client_groups
+        )
     elif heyreach_client:
         return heyreach_client
     else:
