@@ -39,12 +39,27 @@
         <div class="api-key-section" id="sheetsSection" style="display: none;">
             <div class="api-key-container">
                 <h2>Google Sheets Integration (Optional)</h2>
-                <div class="filter-group">
+                
+                <!-- Google Authorization Status -->
+                <div class="filter-group" id="googleAuthStatus" style="margin-bottom: 15px;">
+                    <div id="googleNotConnected" style="display: none;">
+                        <p style="color: #666; margin-bottom: 10px;">Connect your Google account to automatically populate your sheets.</p>
+                        <button id="connectGoogleBtn" class="btn btn-primary">Connect Google Sheets</button>
+                    </div>
+                    <div id="googleConnected" style="display: none;">
+                        <p style="color: #28a745; margin-bottom: 10px;">✓ Google Sheets connected</p>
+                        <button id="disconnectGoogleBtn" class="btn" style="background-color: #dc3545; color: white;">Disconnect</button>
+                    </div>
+                </div>
+                
+                <!-- Sheets URL Input (shown after connection) -->
+                <div class="filter-group" id="sheetsUrlGroup" style="display: none;">
                     <label for="sheetsUrlInput">Google Sheets URL:</label>
                     <input type="text" id="sheetsUrlInput" class="filter-input" placeholder="https://docs.google.com/spreadsheets/d/..." style="width: 100%;">
-                    <small style="color: #666; margin-top: 5px; display: block;">Paste the Google Sheets URL to automatically populate data. The sheet must be publicly accessible or you need service account credentials.</small>
+                    <small style="color: #666; margin-top: 5px; display: block;">Paste the Google Sheets URL you want to populate. The sheet must be accessible by your Google account.</small>
                 </div>
-                <div class="filter-group">
+                
+                <div class="filter-group" id="populateGroup" style="display: none;">
                     <button id="populateSheetsBtn" class="btn btn-primary">Populate Sheets with HeyReach Data</button>
                     <small style="color: #666; margin-top: 5px; display: block;">This will populate the selected date range data into the Google Sheet, matching senders by name.</small>
                 </div>

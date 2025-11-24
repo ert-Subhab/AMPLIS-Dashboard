@@ -8,8 +8,10 @@ import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import gspread
-from google.oauth2.service_account import Credentials
+from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+from google.oauth2.credentials import Credentials as OAuthCredentials
 from google.auth.exceptions import GoogleAuthError
+from google.auth.transport.requests import Request
 
 logger = logging.getLogger(__name__)
 
@@ -17,17 +19,19 @@ logger = logging.getLogger(__name__)
 class SheetsClient:
     """Client for interacting with Google Sheets"""
     
-    def __init__(self, sheet_url: str, credentials_json: Optional[Dict] = None):
+    def __init__(self, sheet_url: str, credentials_json: Optional[Dict] = None, 
+                 oauth_token: Optional[Dict] = None):
         """
         Initialize Google Sheets client
         
         Args:
             sheet_url: Full Google Sheets URL
             credentials_json: Optional service account credentials as dict
-                              If None, will try to access as public sheet (read-only)
+            oauth_token: Optional OAuth 2.0 token dict with 'token', 'refresh_token', 'token_uri', 'client_id', 'client_secret', 'scopes'
         """
         self.sheet_url = sheet_url
         self.credentials_json = credentials_json
+        self.oauth_token = oauth_token
         self.client = None
         self.spreadsheet = None
         
@@ -57,9 +61,28 @@ class SheetsClient:
     def _initialize_client(self):
         """Initialize gspread client"""
         try:
-            if self.credentials_json:
+            if self.oauth_token:
+                # Use OAuth 2.0 credentials (for SaaS - user authorized access)
+                creds = OAuthCredentials(
+                    token=self.oauth_token.get('token'),
+                    refresh_token=self.oauth_token.get('refresh_token'),
+                    token_uri=self.oauth_token.get('token_uri', 'https://oauth2.googleapis.com/token'),
+                    client_id=self.oauth_token.get('client_id'),
+                    client_secret=self.oauth_token.get('client_secret'),
+                    scopes=self.oauth_token.get('scopes', ['https://www.googleapis.com/auth/spreadsheets'])
+                )
+                
+                # Refresh token if expired
+                if creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                    # Update token in oauth_token dict
+                    self.oauth_token['token'] = creds.token
+                
+                self.client = gspread.authorize(creds)
+                logger.info("Initialized Google Sheets client with OAuth 2.0 credentials")
+            elif self.credentials_json:
                 # Use service account credentials
-                creds = Credentials.from_service_account_info(
+                creds = ServiceAccountCredentials.from_service_account_info(
                     self.credentials_json,
                     scopes=['https://www.googleapis.com/auth/spreadsheets']
                 )
@@ -72,12 +95,9 @@ class SheetsClient:
                     logger.info("Initialized Google Sheets client with default service account")
                 except Exception as e:
                     logger.warning(f"No default service account found: {e}")
-                    logger.warning("For write access, you need to provide service account credentials")
-                    logger.warning("The sheet must be shared with the service account email for write access")
                     raise ValueError(
                         "No Google Sheets credentials provided. "
-                        "To write to sheets, you need service account credentials. "
-                        "Please provide credentials_json or set up a default service account."
+                        "Please authorize Google Sheets access or provide service account credentials."
                     )
             
             # Open spreadsheet

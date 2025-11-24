@@ -26,6 +26,11 @@ async function initializeDashboard() {
         document.getElementById('applyFiltersBtn').addEventListener('click', loadPerformanceData);
         document.getElementById('refreshBtn').addEventListener('click', loadPerformanceData);
         document.getElementById('populateSheetsBtn').addEventListener('click', populateSheets);
+        document.getElementById('connectGoogleBtn').addEventListener('click', connectGoogleSheets);
+        document.getElementById('disconnectGoogleBtn').addEventListener('click', disconnectGoogleSheets);
+        
+        // Check Google Sheets connection status on load
+        checkGoogleSheetsStatus();
         
         // Allow Enter key to submit API key
         document.getElementById('apiKeyInput').addEventListener('keypress', function(e) {
@@ -78,6 +83,9 @@ async function initializeApiKey() {
         document.getElementById('apiKeyChangeSection').style.display = 'block';
         document.getElementById('filtersSection').style.display = 'flex';
         document.getElementById('sheetsSection').style.display = 'block';
+        
+        // Check Google Sheets status
+        checkGoogleSheetsStatus();
         
         // Populate senders dropdown
         const senderSelect = document.getElementById('senderSelect');
@@ -595,6 +603,73 @@ function toggleApiKeyVisibility() {
     }
 }
 
+// Check Google Sheets connection status
+async function checkGoogleSheetsStatus() {
+    try {
+        const response = await fetch('/api/google/status');
+        const data = await response.json();
+        
+        if (data.authorized) {
+            document.getElementById('googleNotConnected').style.display = 'none';
+            document.getElementById('googleConnected').style.display = 'block';
+            document.getElementById('sheetsUrlGroup').style.display = 'block';
+            document.getElementById('populateGroup').style.display = 'block';
+        } else {
+            document.getElementById('googleNotConnected').style.display = 'block';
+            document.getElementById('googleConnected').style.display = 'none';
+            document.getElementById('sheetsUrlGroup').style.display = 'none';
+            document.getElementById('populateGroup').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error checking Google Sheets status:', error);
+    }
+}
+
+// Connect Google Sheets (OAuth flow)
+async function connectGoogleSheets() {
+    try {
+        showLoading(true);
+        hideError();
+        
+        // Get authorization URL
+        const response = await fetch('/api/google/authorize');
+        const data = await response.json();
+        
+        if (!response.ok || data.error) {
+            throw new Error(data.error || 'Failed to initiate Google authorization');
+        }
+        
+        // Redirect to Google authorization page
+        window.location.href = data.authorization_url;
+        
+    } catch (error) {
+        console.error('Error connecting Google Sheets:', error);
+        showError('Error connecting to Google Sheets: ' + error.message);
+        showLoading(false);
+    }
+}
+
+// Disconnect Google Sheets
+async function disconnectGoogleSheets() {
+    try {
+        const response = await fetch('/api/google/revoke', {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (!response.ok || data.error) {
+            throw new Error(data.error || 'Failed to disconnect');
+        }
+        
+        showMessage('Google Sheets disconnected successfully');
+        checkGoogleSheetsStatus();
+        
+    } catch (error) {
+        console.error('Error disconnecting Google Sheets:', error);
+        showError('Error disconnecting Google Sheets: ' + error.message);
+    }
+}
+
 // Populate Google Sheets with HeyReach data
 async function populateSheets() {
     try {
@@ -646,8 +721,15 @@ async function populateSheets() {
         
         const data = await response.json();
         
-        if (!response.ok || data.error) {
-            throw new Error(data.error || 'Failed to populate sheets');
+        if (!response.ok) {
+            if (data.requires_auth) {
+                showError('Please connect Google Sheets first by clicking "Connect Google Sheets"');
+                checkGoogleSheetsStatus();
+            } else {
+                throw new Error(data.error || 'Failed to populate sheets');
+            }
+            showLoading(false);
+            return;
         }
         
         // Show success message

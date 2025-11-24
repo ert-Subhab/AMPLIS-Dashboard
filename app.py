@@ -7,11 +7,15 @@ Flask web application for HeyReach performance tracking
 import yaml
 import os
 from datetime import datetime, timedelta
-from flask import Flask, render_template, jsonify, request, session
+from flask import Flask, render_template, jsonify, request, session, redirect
 from flask_cors import CORS
 import logging
 from heyreach_client import HeyReachClient
 from sheets_client import SheetsClient
+from google_oauth import (
+    get_authorization_url, handle_oauth_callback, 
+    get_stored_credentials, is_authorized, revoke_authorization
+)
 import secrets
 
 # Configure logging
@@ -640,6 +644,59 @@ def get_summary():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/google/authorize', methods=['GET'])
+def google_authorize():
+    """Initiate Google OAuth authorization"""
+    try:
+        # Get redirect URI from request or use default
+        redirect_uri = request.args.get('redirect_uri') or request.url_root.rstrip('/') + '/api/google/callback'
+        
+        authorization_url = get_authorization_url(redirect_uri)
+        return jsonify({'authorization_url': authorization_url})
+    except Exception as e:
+        logger.error(f"Error initiating OAuth: {e}")
+        return jsonify({'error': f'Failed to initiate Google authorization: {str(e)}'}), 500
+
+
+@app.route('/api/google/callback', methods=['GET'])
+def google_callback():
+    """Handle Google OAuth callback"""
+    try:
+        code = request.args.get('code')
+        state = request.args.get('state')
+        
+        if not code:
+            return jsonify({'error': 'Authorization code not provided'}), 400
+        
+        token_info = handle_oauth_callback(code, state)
+        
+        # Redirect to dashboard with success message
+        return redirect('/?google_connected=1')
+    except Exception as e:
+        logger.error(f"Error handling OAuth callback: {e}")
+        return redirect('/?google_error=1')
+
+
+@app.route('/api/google/status', methods=['GET'])
+def google_status():
+    """Check Google Sheets authorization status"""
+    return jsonify({
+        'authorized': is_authorized(),
+        'message': 'Google Sheets connected' if is_authorized() else 'Not connected'
+    })
+
+
+@app.route('/api/google/revoke', methods=['POST'])
+def google_revoke():
+    """Revoke Google Sheets authorization"""
+    try:
+        revoke_authorization()
+        return jsonify({'success': True, 'message': 'Google Sheets authorization revoked'})
+    except Exception as e:
+        logger.error(f"Error revoking authorization: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/populate-sheets', methods=['POST'])
 def populate_sheets():
     """Populate Google Sheets with HeyReach data"""
@@ -649,6 +706,14 @@ def populate_sheets():
         
         if not sheets_url:
             return jsonify({'error': 'Google Sheets URL is required'}), 400
+        
+        # Check if user has authorized Google Sheets access
+        if not is_authorized():
+            return jsonify({
+                'error': 'Google Sheets not authorized',
+                'requires_auth': True,
+                'message': 'Please authorize Google Sheets access first'
+            }), 401
         
         # Get client from session or global
         client = get_client_for_request()
@@ -681,9 +746,12 @@ def populate_sheets():
                 'updated': 0
             }), 200
         
-        # Initialize Sheets client
+        # Get OAuth token from session
+        oauth_token = session.get('google_oauth_token')
+        
+        # Initialize Sheets client with OAuth token
         try:
-            sheets_client = SheetsClient(sheets_url)
+            sheets_client = SheetsClient(sheets_url, oauth_token=oauth_token)
         except Exception as e:
             logger.error(f"Error initializing Sheets client: {e}")
             return jsonify({'error': f'Failed to connect to Google Sheets: {str(e)}'}), 400
