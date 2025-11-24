@@ -285,9 +285,9 @@ function findOrCreateWeekColumns(sheet, headerRow, weeks) {
     }
   }
   
-  // Process each week
-  for (const week of weeks) {
-    const weekKey = formatWeekDate(week.week_start || week.week_end);
+    // Process each week (use week_end which is Friday, not week_start)
+    for (const week of weeks) {
+      const weekKey = formatWeekDate(week.week_end || week.week_start);
     
     // Check if week column already exists
     let foundCol = null;
