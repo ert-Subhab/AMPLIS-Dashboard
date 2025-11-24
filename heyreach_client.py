@@ -1180,14 +1180,14 @@ class HeyReachClient:
             'leads_not_enrolled': 0
         }))
         
-        # Get stats for each sender and each week
-        for account in linkedin_accounts:
+        # Use parallel processing for API calls to avoid timeout when "all" is selected
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        def fetch_sender_week_stats(account, week):
+            """Fetch stats for a single sender-week combination"""
             account_id = account.get('id')
-            # Convert account_id to int for lookup if needed
             account_id_int = int(account_id) if account_id and isinstance(account_id, (str, float)) else account_id
             
-            # Prioritize name from config.yaml (manual_sender_names), then API response
-            # Try both int and original format for lookup
             sender_name = (
                 self.manual_sender_names.get(account_id_int) or 
                 self.manual_sender_names.get(account_id) or
@@ -1196,168 +1196,183 @@ class HeyReachClient:
                 f"Account {account_id}"
             )
             
-            logger.info(f"Fetching stats for sender: {sender_name} (ID: {account_id})")
+            week_start_iso = week['start'].strftime('%Y-%m-%dT00:00:00.000Z')
+            week_end_iso = week['end'].strftime('%Y-%m-%dT23:59:59.999Z')
             
-            # Get stats for each week
+            api_account_id = account_id_int if account_id_int else account_id
+            stats = self.get_overall_stats(
+                account_ids=[api_account_id],
+                campaign_ids=[],
+                start_date=week_start_iso,
+                end_date=week_end_iso
+            )
+            
+            return {
+                'account': account,
+                'account_id': account_id,
+                'account_id_int': account_id_int,
+                'sender_name': sender_name,
+                'week': week,
+                'stats': stats
+            }
+        
+        # Create list of all sender-week combinations for parallel processing
+        tasks = []
+        for account in linkedin_accounts:
             for week in weeks:
-                week_start_iso = week['start'].strftime('%Y-%m-%dT00:00:00.000Z')
-                week_end_iso = week['end'].strftime('%Y-%m-%dT23:59:59.999Z')
-                
-                logger.debug(f"  Fetching stats for week {week['key']} ({week_start_iso} to {week_end_iso})")
-                
-                # Get stats for this sender and week
-                # get_overall_stats will handle account ID conversion to integer
-                # Ensure account_id is the integer version for API call
-                api_account_id = account_id_int if account_id_int else account_id
-                logger.debug(f"  Making API call with accountIds=[{api_account_id}] for sender {sender_name} (original ID: {account_id})")
-                stats = self.get_overall_stats(
-                    account_ids=[api_account_id],
-                    campaign_ids=[],
-                    start_date=week_start_iso,
-                    end_date=week_end_iso
-                )
-                
-                # Log the full response structure on first successful call (to understand API structure)
-                account_idx = linkedin_accounts.index(account)
-                week_idx = [w['key'] for w in weeks].index(week['key'])
-                
-                if account_idx == 0 and week_idx == 0:
-                    logger.info(f"📊 GetOverallStats Response Structure (First Call):")
-                    logger.info(f"   Response type: {type(stats).__name__}")
-                    if isinstance(stats, dict):
+                tasks.append((account, week))
+        
+        logger.info(f"Processing {len(tasks)} sender-week combinations in parallel...")
+        
+        # Process tasks in parallel with ThreadPoolExecutor
+        # Use max_workers to limit concurrent API calls (avoid overwhelming the API)
+        max_workers = min(10, len(tasks))  # Max 10 concurrent requests
+        
+        first_result_logged = False
+        
+        def get_field_value(stats_dict, *field_names, default=0):
+            """Get field value, trying multiple field names, handling 0 correctly"""
+            if not isinstance(stats_dict, dict):
+                return default
+            for field_name in field_names:
+                # Try exact match first
+                if field_name in stats_dict:
+                    value = stats_dict[field_name]
+                    if value is not None:
+                        try:
+                            return float(value) if isinstance(value, (int, float, str)) else default
+                        except (ValueError, TypeError):
+                            return default
+                # Try case-insensitive match
+                for key in stats_dict.keys():
+                    if key.lower() == field_name.lower():
+                        value = stats_dict[key]
+                        if value is not None:
+                            try:
+                                return float(value) if isinstance(value, (int, float, str)) else default
+                            except (ValueError, TypeError):
+                                return default
+            return default
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_task = {executor.submit(fetch_sender_week_stats, account, week): (account, week) 
+                             for account, week in tasks}
+            
+            # Process completed tasks
+            completed = 0
+            for future in as_completed(future_to_task):
+                completed += 1
+                try:
+                    result = future.result()
+                    account = result['account']
+                    account_id = result['account_id']
+                    account_id_int = result['account_id_int']
+                    sender_name = result['sender_name']
+                    week = result['week']
+                    stats = result['stats']
+                    
+                    # Log progress
+                    if completed % 10 == 0 or completed == len(tasks):
+                        logger.info(f"Processed {completed}/{len(tasks)} API calls...")
+                    
+                    # Log the full response structure on first successful call
+                    if not first_result_logged and stats and isinstance(stats, dict):
+                        logger.info(f"📊 GetOverallStats Response Structure (First Call):")
+                        logger.info(f"   Response type: {type(stats).__name__}")
                         logger.info(f"   Keys: {list(stats.keys())}")
-                        # Log full response to understand structure
                         full_response = json.dumps(stats, indent=2, default=str)
                         logger.info(f"   Full response:\n{full_response}")
+                        first_result_logged = True
+                    
+                    # Check if stats is a valid dict (even if empty - that's valid data)
+                    if stats is None:
+                        logger.warning(f"    ⚠️ Stats is None for {sender_name} week {week['key']} - API call may have failed")
+                        # Use default 0s
+                    elif not isinstance(stats, dict):
+                        logger.warning(f"    ⚠️ Stats is not a dict for {sender_name} week {week['key']} - type: {type(stats).__name__}, value: {str(stats)[:200]}")
+                        # Use default 0s
+                    else:
+                        # Empty dict is valid - means no data for this period
+                        if len(stats) == 0:
+                            logger.debug(f"    Empty stats response for {sender_name} week {week['key']} - no data for this period")
+                            # Continue - we'll show 0s which is correct
                         
-                        # Log all values to see what we're getting
-                        logger.info(f"   Values:")
-                        for key, value in stats.items():
-                            logger.info(f"     {key}: {value} (type: {type(value).__name__})")
-                    else:
-                        logger.info(f"   Response (not dict): {str(stats)[:500]}")
-                
-                # Check if stats is a valid dict (even if empty - that's valid data)
-                if stats is None:
-                    logger.warning(f"    ⚠️ Stats is None for {sender_name} week {week['key']} - API call may have failed")
-                    # Use default 0s
-                elif not isinstance(stats, dict):
-                    logger.warning(f"    ⚠️ Stats is not a dict for {sender_name} week {week['key']} - type: {type(stats).__name__}, value: {str(stats)[:200]}")
-                    # Use default 0s
-                else:
-                    # Empty dict is valid - means no data for this period
-                    if len(stats) == 0:
-                        logger.debug(f"    Empty stats response for {sender_name} week {week['key']} - no data for this period")
-                        # Continue - we'll show 0s which is correct
-                    else:
-                        # Log all available keys if this is the first call
-                        if account_idx == 0 and week_idx == 0:
-                            logger.info(f"    Available keys in stats: {list(stats.keys())}")
-                            # Try to find any numeric fields
-                            numeric_fields = {k: v for k, v in stats.items() if isinstance(v, (int, float))}
-                            if numeric_fields:
-                                logger.info(f"    Numeric fields found: {numeric_fields}")
-                    
-                    # Extract metrics from stats response
-                    # Note: Field names may vary - adjust based on actual API response
-                    week_data = sender_weekly_data[sender_name][week['key']]
-                    
-                    # Map API response fields to our metrics
-                    # Try multiple possible field names from the API response
-                    # Use helper function to safely get values (handles 0 correctly)
-                    def get_field_value(stats_dict, *field_names, default=0):
-                        """Get field value, trying multiple field names, handling 0 correctly"""
-                        if not isinstance(stats_dict, dict):
-                            return default
-                        for field_name in field_names:
-                            # Try exact match first
-                            if field_name in stats_dict:
-                                value = stats_dict[field_name]
-                                if value is not None:
-                                    try:
-                                        return float(value) if isinstance(value, (int, float, str)) else default
-                                    except (ValueError, TypeError):
-                                        return default
-                            # Try case-insensitive match
-                            for key in stats_dict.keys():
-                                if key.lower() == field_name.lower():
-                                    value = stats_dict[key]
-                                    if value is not None:
-                                        try:
-                                            return float(value) if isinstance(value, (int, float, str)) else default
-                                        except (ValueError, TypeError):
-                                            return default
-                        return default
-                    
-                    # HeyReach API field names (based on actual API response)
-                    # The API returns: connectionsSent, connectionsAccepted, messagesSent, 
-                    # totalMessageReplies, totalMessageStarted, etc.
-                    week_data['connections_sent'] = get_field_value(
-                        stats, 
-                        'connectionsSent',  # HeyReach API field name
-                        'connectionRequestsSent', 'connectionRequests', 
-                        'invitesSent', 'sentConnections', 'totalConnectionsSent',
-                        'connectionRequestsCount', 'invitesSentCount'
-                    )
-                    
-                    week_data['connections_accepted'] = get_field_value(
-                        stats, 
-                        'connectionsAccepted',  # HeyReach API field name
-                        'acceptedConnections', 'invitesAccepted', 
-                        'acceptedInvites', 'totalConnectionsAccepted',
-                        'acceptedConnectionRequests', 'acceptedInvitesCount'
-                    )
-                    
-                    week_data['messages_sent'] = get_field_value(
-                        stats, 
-                        'totalMessageStarted',  # Use totalMessageStarted for messages sent (as per user requirement)
-                        'messagesSent',  # Fallback to messagesSent if totalMessageStarted not available
-                        'sentMessages', 'totalMessagesSent', 'messages',
-                        'messageCount', 'totalMessages', 'messagesSentCount'
-                    )
-                    
-                    week_data['message_replies'] = get_field_value(
-                        stats, 
-                        'totalMessageReplies',  # HeyReach API field name
-                        'repliesReceived', 'replies', 'messageReplies', 
-                        'totalReplies', 'repliesCount', 'replyCount'
-                    )
-                    
-                    # Note: totalMessageStarted is now used for messages_sent
-                    # For open_conversations, we need to find a different field or calculate it
-                    # Open conversations might be messagesSent - totalMessageReplies, or a separate field
-                    week_data['open_conversations'] = get_field_value(
-                        stats, 
-                        'openConversations', 'activeConversations', 
-                        'conversations', 'activeChats', 'messageStarted',
-                        'totalMessageStarted'  # Fallback if no other field available
-                    )
-                    
-                    # Note: HeyReach API doesn't seem to have explicit "interested" or "leads_not_enrolled" fields
-                    # These might need to be calculated from other fields or may not be available
-                    week_data['interested'] = get_field_value(
-                        stats, 
-                        'interested', 'interestedLeads', 
-                        'leadsInterested', 'interestedCount', 'interestedLeadsCount'
-                    )
-                    
-                    week_data['leads_not_enrolled'] = get_field_value(
-                        stats, 
-                        'leadsNotEnrolled', 'pendingLeads', 
-                        'notEnrolled', 'pending', 'pendingLeadsCount'
-                    )
-                    
-                    # Log extracted values for debugging (log for all senders, not just first)
-                    logger.info(f"📊 Extracted metrics for {sender_name} (ID: {account_id}, week {week['key']}):")
-                    logger.info(f"   Connections Sent: {week_data['connections_sent']}")
-                    logger.info(f"   Connections Accepted: {week_data['connections_accepted']}")
-                    logger.info(f"   Messages Sent: {week_data['messages_sent']}")
-                    logger.info(f"   Message Replies: {week_data['message_replies']}")
-                    logger.info(f"   Open Conversations: {week_data['open_conversations']}")
-                    logger.info(f"   Interested: {week_data['interested']}")
-                    logger.info(f"   Leads Not Enrolled: {week_data['leads_not_enrolled']}")
-                    
-                    logger.debug(f"    Week {week['key']} Stats for {sender_name}: {week_data}")
+                        # Extract metrics from stats response
+                        week_data = sender_weekly_data[sender_name][week['key']]
+                        
+                        # HeyReach API field names (based on actual API response)
+                        week_data['connections_sent'] = get_field_value(
+                            stats, 
+                            'connectionsSent',  # HeyReach API field name
+                            'connectionRequestsSent', 'connectionRequests', 
+                            'invitesSent', 'sentConnections', 'totalConnectionsSent',
+                            'connectionRequestsCount', 'invitesSentCount'
+                        )
+                        
+                        week_data['connections_accepted'] = get_field_value(
+                            stats, 
+                            'connectionsAccepted',  # HeyReach API field name
+                            'acceptedConnections', 'invitesAccepted', 
+                            'acceptedInvites', 'totalConnectionsAccepted',
+                            'acceptedConnectionRequests', 'acceptedInvitesCount'
+                        )
+                        
+                        week_data['messages_sent'] = get_field_value(
+                            stats, 
+                            'totalMessageStarted',  # Use totalMessageStarted for messages sent (as per user requirement)
+                            'messagesSent',  # Fallback to messagesSent if totalMessageStarted not available
+                            'sentMessages', 'totalMessagesSent', 'messages',
+                            'messageCount', 'totalMessages', 'messagesSentCount'
+                        )
+                        
+                        week_data['message_replies'] = get_field_value(
+                            stats, 
+                            'totalMessageReplies',  # HeyReach API field name
+                            'repliesReceived', 'replies', 'messageReplies', 
+                            'totalReplies', 'repliesCount', 'replyCount'
+                        )
+                        
+                        # Note: totalMessageStarted is now used for messages_sent
+                        # For open_conversations, we need to find a different field or calculate it
+                        week_data['open_conversations'] = get_field_value(
+                            stats, 
+                            'openConversations', 'activeConversations', 
+                            'conversations', 'activeChats', 'messageStarted',
+                            'totalMessageStarted'  # Fallback if no other field available
+                        )
+                        
+                        # Note: HeyReach API doesn't seem to have explicit "interested" or "leads_not_enrolled" fields
+                        week_data['interested'] = get_field_value(
+                            stats, 
+                            'interested', 'interestedLeads', 
+                            'leadsInterested', 'interestedCount', 'interestedLeadsCount'
+                        )
+                        
+                        week_data['leads_not_enrolled'] = get_field_value(
+                            stats, 
+                            'leadsNotEnrolled', 'pendingLeads', 
+                            'notEnrolled', 'pending', 'pendingLeadsCount'
+                        )
+                        
+                        # Log extracted values for debugging (only for first few to avoid spam)
+                        if completed <= 3:
+                            logger.info(f"📊 Extracted metrics for {sender_name} (ID: {account_id}, week {week['key']}):")
+                            logger.info(f"   Connections Sent: {week_data['connections_sent']}")
+                            logger.info(f"   Connections Accepted: {week_data['connections_accepted']}")
+                            logger.info(f"   Messages Sent: {week_data['messages_sent']}")
+                            logger.info(f"   Message Replies: {week_data['message_replies']}")
+                            logger.info(f"   Open Conversations: {week_data['open_conversations']}")
+                        
+                        logger.debug(f"    Week {week['key']} Stats for {sender_name}: {week_data}")
+                        
+                except Exception as e:
+                    account, week = future_to_task[future]
+                    logger.error(f"Error processing {account.get('id')} week {week['key']}: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+        
+        logger.info(f"Completed processing all {len(tasks)} sender-week combinations")
         
         # Format data for response - group by client if client groups are available
         result = {
