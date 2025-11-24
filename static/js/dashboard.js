@@ -33,11 +33,25 @@ async function initializeDashboard() {
         const saveOAuthBtn = document.getElementById('saveOAuthCredentialsBtn');
         const toggleOAuthSecretBtn = document.getElementById('toggleOAuthSecretBtn');
         
+        // Export event listeners
+        const exportCsvBtn = document.getElementById('exportCsvBtn');
+        const toggleAppsScriptBtn = document.getElementById('toggleAppsScriptBtn');
+        const sendToAppsScriptBtn = document.getElementById('sendToAppsScriptBtn');
+        const showAppsScriptHelpBtn = document.getElementById('showAppsScriptHelpBtn');
+        const copyScriptBtn = document.getElementById('copyScriptBtn');
+        const openOAuthSectionBtn = document.getElementById('openOAuthSectionBtn');
+        
         if (populateBtn) populateBtn.addEventListener('click', populateSheets);
         if (connectGoogleBtn) connectGoogleBtn.addEventListener('click', connectGoogleSheets);
         if (disconnectGoogleBtn) disconnectGoogleBtn.addEventListener('click', disconnectGoogleSheets);
         if (saveOAuthBtn) saveOAuthBtn.addEventListener('click', saveOAuthCredentials);
         if (toggleOAuthSecretBtn) toggleOAuthSecretBtn.addEventListener('click', toggleOAuthSecretVisibility);
+        if (exportCsvBtn) exportCsvBtn.addEventListener('click', exportToCsv);
+        if (toggleAppsScriptBtn) toggleAppsScriptBtn.addEventListener('click', toggleAppsScriptInput);
+        if (sendToAppsScriptBtn) sendToAppsScriptBtn.addEventListener('click', sendToAppsScript);
+        if (showAppsScriptHelpBtn) showAppsScriptHelpBtn.addEventListener('click', showAppsScriptHelp);
+        if (copyScriptBtn) copyScriptBtn.addEventListener('click', copyAppsScriptTemplate);
+        if (openOAuthSectionBtn) openOAuthSectionBtn.addEventListener('click', scrollToOAuthSection);
         
         // Check Google Sheets connection status on load
         checkGoogleSheetsStatus();
@@ -45,7 +59,7 @@ async function initializeDashboard() {
         // Check for OAuth callback success/error
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('google_connected') === '1') {
-            showMessage('Google Sheets connected successfully!');
+            showMessage('Google Sheets connected successfully!', 'success');
             checkGoogleSheetsStatus();
             // Clean URL
             window.history.replaceState({}, document.title, window.location.pathname);
@@ -220,6 +234,9 @@ async function loadPerformanceData() {
         updateSummary(data);
         updatePerformanceTables(data);
         updateChart(data);
+        
+        // Show export section
+        document.getElementById('exportSection').style.display = 'block';
         
         showLoading(false);
     } catch (error) {
@@ -568,7 +585,7 @@ function hideError() {
 }
 
 // Add a function to show informational messages
-function showMessage(message) {
+function showMessage(message, type = 'info') {
     const messageDiv = document.getElementById('messageDiv');
     if (!messageDiv) {
         // Create message div if it doesn't exist
@@ -576,8 +593,7 @@ function showMessage(message) {
         const filtersSection = document.querySelector('.filters-section');
         const msg = document.createElement('div');
         msg.id = 'messageDiv';
-        msg.className = 'alert alert-info';
-        msg.style.cssText = 'margin: 20px 0; padding: 15px; background-color: #d1ecf1; border: 1px solid #bee5eb; border-radius: 4px; color: #0c5460; text-align: center;';
+        msg.className = `alert alert-${type === 'success' ? 'success' : 'info'}`;
         msg.textContent = message;
         // Insert after filters section
         if (filtersSection && filtersSection.nextSibling) {
@@ -589,7 +605,15 @@ function showMessage(message) {
         }
     } else {
         messageDiv.textContent = message;
-        messageDiv.style.display = 'block';
+        messageDiv.className = `alert alert-${type === 'success' ? 'success' : 'info'}`;
+        messageDiv.style.display = 'flex';
+    }
+    
+    // Auto-hide after 5 seconds for success messages
+    if (type === 'success') {
+        setTimeout(() => {
+            hideMessage();
+        }, 5000);
     }
 }
 
@@ -665,6 +689,210 @@ function hideOAuthHelp() {
     const modal = document.getElementById('oauthHelpModal');
     if (modal) {
         modal.style.display = 'none';
+    }
+}
+
+// Export to CSV
+async function exportToCsv() {
+    try {
+        // Check if data is loaded
+        if (!currentData) {
+            showError('Please load data first by clicking "Load Data"');
+            return;
+        }
+        
+        showLoading(true);
+        hideError();
+        
+        const senderId = document.getElementById('senderSelect').value;
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+        
+        if (!startDate || !endDate) {
+            showError('Please select both start and end dates');
+            showLoading(false);
+            return;
+        }
+        
+        // Create form data
+        const response = await fetch('/api/export-csv', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                sender_id: senderId,
+                start_date: startDate,
+                end_date: endDate
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to export CSV');
+        }
+        
+        // Get filename from Content-Disposition header or use default
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = 'heyreach_data.csv';
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+            if (filenameMatch) {
+                filename = filenameMatch[1];
+            }
+        }
+        
+        // Download the file
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        showMessage(`CSV file "${filename}" downloaded successfully!`, 'success');
+        showLoading(false);
+        
+    } catch (error) {
+        console.error('Error exporting CSV:', error);
+        showError('Error exporting CSV: ' + error.message);
+        showLoading(false);
+    }
+}
+
+// Toggle Apps Script input
+function toggleAppsScriptInput() {
+    const inputGroup = document.getElementById('appsScriptInputGroup');
+    const toggleBtn = document.getElementById('toggleAppsScriptBtn');
+    
+    if (inputGroup.style.display === 'none') {
+        inputGroup.style.display = 'block';
+        toggleBtn.innerHTML = '<span class="btn-icon">❌</span><span>Cancel</span>';
+    } else {
+        inputGroup.style.display = 'none';
+        toggleBtn.innerHTML = '<span class="btn-icon">⚙️</span><span>Set Up Apps Script</span>';
+    }
+}
+
+// Send to Apps Script
+async function sendToAppsScript() {
+    try {
+        const appsScriptUrl = document.getElementById('appsScriptUrlInput').value.trim();
+        
+        if (!appsScriptUrl) {
+            showError('Please enter your Apps Script web app URL');
+            return;
+        }
+        
+        // Validate URL
+        if (!appsScriptUrl.startsWith('https://script.google.com')) {
+            showError('Invalid Apps Script URL. Must start with https://script.google.com');
+            return;
+        }
+        
+        // Check if data is loaded
+        if (!currentData) {
+            showError('Please load data first by clicking "Load Data"');
+            return;
+        }
+        
+        showLoading(true);
+        hideError();
+        
+        const senderId = document.getElementById('senderSelect').value;
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+        
+        if (!startDate || !endDate) {
+            showError('Please select both start and end dates');
+            showLoading(false);
+            return;
+        }
+        
+        const response = await fetch('/api/send-to-apps-script', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                apps_script_url: appsScriptUrl,
+                sender_id: senderId,
+                start_date: startDate,
+                end_date: endDate
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok || data.error) {
+            throw new Error(data.error || 'Failed to send data to Apps Script');
+        }
+        
+        showMessage(data.message || 'Data sent successfully to Apps Script!', 'success');
+        showLoading(false);
+        
+    } catch (error) {
+        console.error('Error sending to Apps Script:', error);
+        showError('Error sending to Apps Script: ' + error.message);
+        showLoading(false);
+    }
+}
+
+// Show Apps Script help
+function showAppsScriptHelp() {
+    const modal = document.getElementById('appsScriptHelpModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+// Hide Apps Script help
+function hideAppsScriptHelp() {
+    const modal = document.getElementById('appsScriptHelpModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// Copy Apps Script template
+async function copyAppsScriptTemplate() {
+    try {
+        const response = await fetch('/static/google_apps_script_template.js');
+        const scriptText = await response.text();
+        
+        await navigator.clipboard.writeText(scriptText);
+        
+        const copyBtn = document.getElementById('copyScriptBtn');
+        const originalText = copyBtn.innerHTML;
+        copyBtn.innerHTML = '<span>✅ Copied!</span>';
+        copyBtn.style.background = 'linear-gradient(135deg, #28a745 0%, #20c997 100%)';
+        
+        setTimeout(() => {
+            copyBtn.innerHTML = originalText;
+            copyBtn.style.background = '';
+        }, 2000);
+        
+        showMessage('Apps Script template copied to clipboard!', 'success');
+    } catch (error) {
+        console.error('Error copying script:', error);
+        showError('Failed to copy script template');
+    }
+}
+
+// Scroll to OAuth section
+function scrollToOAuthSection() {
+    const sheetsSection = document.getElementById('sheetsSection');
+    if (sheetsSection) {
+        sheetsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Highlight the section briefly
+        sheetsSection.style.transition = 'box-shadow 0.3s ease';
+        sheetsSection.style.boxShadow = '0 0 0 4px rgba(102, 126, 234, 0.3)';
+        setTimeout(() => {
+            sheetsSection.style.boxShadow = '';
+        }, 2000);
     }
 }
 
@@ -756,7 +984,7 @@ async function saveOAuthCredentials() {
             throw new Error(data.error || 'Failed to save credentials');
         }
         
-        showMessage(data.message || 'OAuth credentials saved successfully!');
+        showMessage(data.message || 'OAuth credentials saved successfully!', 'success');
         showLoading(false);
         
         // Refresh status to show connect button
@@ -816,7 +1044,7 @@ async function disconnectGoogleSheets() {
             throw new Error(data.error || 'Failed to disconnect');
         }
         
-        showMessage('Google Sheets disconnected successfully');
+        showMessage('Google Sheets disconnected successfully', 'success');
         checkGoogleSheetsStatus();
         
     } catch (error) {

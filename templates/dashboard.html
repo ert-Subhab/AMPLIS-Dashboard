@@ -11,9 +11,15 @@
     <div class="dashboard-container">
         <!-- Header -->
         <header class="dashboard-header">
-            <h1>HeyReach Performance Tracker</h1>
+            <div class="header-title">
+                <h1>📊 HeyReach Performance Tracker</h1>
+                <p class="header-subtitle">Track and analyze your LinkedIn outreach performance</p>
+            </div>
             <div class="header-controls">
-                <button id="refreshBtn" class="btn btn-primary">Refresh Data</button>
+                <button id="refreshBtn" class="btn btn-header">
+                    <span class="btn-icon">🔄</span>
+                    <span>Refresh</span>
+                </button>
             </div>
         </header>
 
@@ -133,7 +139,121 @@
                 <input type="date" id="endDate" class="filter-input">
             </div>
             <div class="filter-group">
-                <button id="applyFiltersBtn" class="btn btn-primary">Apply Filters</button>
+                <button id="applyFiltersBtn" class="btn btn-primary">
+                    <span class="btn-icon">📊</span>
+                    <span>Load Data</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Export Options Section -->
+        <div class="export-section" id="exportSection" style="display: none;">
+            <div class="export-container">
+                <h2>
+                    <span class="section-icon">📤</span>
+                    Export & Integration Options
+                </h2>
+                <div class="export-options-grid">
+                    <!-- CSV Export -->
+                    <div class="export-option-card">
+                        <div class="export-icon">📥</div>
+                        <h3>Download CSV</h3>
+                        <p>Export your data as a CSV file that you can import into Google Sheets or Excel.</p>
+                        <button id="exportCsvBtn" class="btn btn-export">
+                            <span class="btn-icon">⬇️</span>
+                            <span>Download CSV</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Google Apps Script -->
+                    <div class="export-option-card">
+                        <div class="export-icon">🔗</div>
+                        <h3>Google Apps Script</h3>
+                        <p>Send data directly to your Google Sheet using Apps Script. No OAuth needed!</p>
+                        <div class="apps-script-input-group" style="display: none;" id="appsScriptInputGroup">
+                            <input type="text" id="appsScriptUrlInput" class="filter-input" placeholder="https://script.google.com/..." style="width: 100%; margin-bottom: 10px;">
+                            <button id="sendToAppsScriptBtn" class="btn btn-export">
+                                <span class="btn-icon">🚀</span>
+                                <span>Send to Apps Script</span>
+                            </button>
+                            <button id="showAppsScriptHelpBtn" class="btn btn-link" style="margin-top: 10px;">
+                                <span>📖 How to set up Apps Script</span>
+                            </button>
+                        </div>
+                        <button id="toggleAppsScriptBtn" class="btn btn-export">
+                            <span class="btn-icon">⚙️</span>
+                            <span>Set Up Apps Script</span>
+                        </button>
+                    </div>
+                    
+                    <!-- OAuth Google Sheets -->
+                    <div class="export-option-card">
+                        <div class="export-icon">🔐</div>
+                        <h3>Direct Google Sheets (OAuth)</h3>
+                        <p>Automatically populate your Google Sheets using OAuth authentication.</p>
+                        <button id="openOAuthSectionBtn" class="btn btn-export">
+                            <span class="btn-icon">🔑</span>
+                            <span>Configure OAuth</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Apps Script Help Modal -->
+                <div id="appsScriptHelpModal" class="help-modal" style="display: none;">
+                    <div class="help-modal-content">
+                        <span class="help-modal-close" onclick="hideAppsScriptHelp(); return false;">&times;</span>
+                        <h3>📖 How to Set Up Google Apps Script</h3>
+                        <div class="help-steps">
+                            <div class="help-step">
+                                <div class="step-number">1</div>
+                                <div class="step-content">
+                                    <h4>Open Your Google Sheet</h4>
+                                    <p>Open the Google Sheet where you want the data to appear.</p>
+                                </div>
+                            </div>
+                            <div class="help-step">
+                                <div class="step-number">2</div>
+                                <div class="step-content">
+                                    <h4>Open Apps Script Editor</h4>
+                                    <p>Go to <strong>Extensions</strong> → <strong>Apps Script</strong></p>
+                                </div>
+                            </div>
+                            <div class="help-step">
+                                <div class="step-number">3</div>
+                                <div class="step-content">
+                                    <h4>Paste the Script</h4>
+                                    <p>Delete the default code and paste the template script.</p>
+                                    <button id="copyScriptBtn" class="btn btn-small">
+                                        <span>📋 Copy Script Template</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="help-step">
+                                <div class="step-number">4</div>
+                                <div class="step-content">
+                                    <h4>Deploy as Web App</h4>
+                                    <p>Click <strong>"Deploy"</strong> → <strong>"New deployment"</strong></p>
+                                    <ul>
+                                        <li>Choose <strong>"Web app"</strong> as type</li>
+                                        <li>Set <strong>"Execute as"</strong> to <strong>"Me"</strong></li>
+                                        <li>Set <strong>"Who has access"</strong> to <strong>"Anyone"</strong></li>
+                                        <li>Click <strong>"Deploy"</strong></li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="help-step">
+                                <div class="step-number">5</div>
+                                <div class="step-content">
+                                    <h4>Copy Web App URL</h4>
+                                    <p>Copy the Web app URL and paste it in the dashboard.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="help-modal-footer">
+                            <button onclick="hideAppsScriptHelp(); return false;" class="btn btn-primary">Got it!</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 

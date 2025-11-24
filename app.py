@@ -306,6 +306,16 @@ def index():
     return render_template('dashboard.html')
 
 
+@app.route('/static/google_apps_script_template.js')
+def apps_script_template():
+    """Serve the Google Apps Script template"""
+    try:
+        with open('static/google_apps_script_template.js', 'r') as f:
+            return f.read(), 200, {'Content-Type': 'application/javascript'}
+    except FileNotFoundError:
+        return "// Apps Script template not found", 404
+
+
 @app.route('/api/initialize', methods=['POST'])
 def initialize_api_key():
     """Initialize HeyReach client with API key from request"""
@@ -756,6 +766,178 @@ def google_revoke():
     except Exception as e:
         logger.error(f"Error revoking authorization: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/export-csv', methods=['POST'])
+def export_csv():
+    """Export HeyReach data as CSV"""
+    try:
+        import csv
+        import io
+        from flask import Response
+        
+        # Get client from session or global
+        client = get_client_for_request()
+        
+        if not client:
+            return jsonify({'error': 'HeyReach API key not set. Please enter your API key first.'}), 400
+        
+        data = request.get_json()
+        sender_id = data.get('sender_id', 'all')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        # If no dates provided, default to last 7 days
+        if not start_date or not end_date:
+            end_date_obj = datetime.now()
+            start_date_obj = end_date_obj - timedelta(days=7)
+            start_date = start_date_obj.strftime('%Y-%m-%d')
+            end_date = end_date_obj.strftime('%Y-%m-%d')
+        
+        # Get performance data
+        performance_data = client.get_sender_weekly_performance(
+            sender_id=None if sender_id == 'all' else sender_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        if not performance_data or not performance_data.get('senders'):
+            return jsonify({'error': 'No data available for the selected date range'}), 400
+        
+        # Create CSV in memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'Sender Name', 'Week Start', 'Connections Sent', 'Connections Accepted',
+            'Acceptance Rate (%)', 'Messages Sent', 'Message Replies', 'Reply Rate (%)',
+            'Open Conversations', 'Interested', 'Leads Not Enrolled'
+        ])
+        
+        # Write data
+        for sender_name, weeks_data in performance_data.get('senders', {}).items():
+            for week_data in weeks_data:
+                writer.writerow([
+                    sender_name,
+                    week_data.get('week_start', ''),
+                    week_data.get('connections_sent', 0),
+                    week_data.get('connections_accepted', 0),
+                    week_data.get('acceptance_rate', 0),
+                    week_data.get('messages_sent', 0),
+                    week_data.get('message_replies', 0),
+                    week_data.get('reply_rate', 0),
+                    week_data.get('open_conversations', 0),
+                    week_data.get('interested', 0),
+                    week_data.get('leads_not_enrolled', 0)
+                ])
+        
+        # Create response
+        output.seek(0)
+        filename = f'heyreach_data_{start_date}_to_{end_date}.csv'
+        
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={
+                'Content-Disposition': f'attachment; filename={filename}',
+                'Content-Type': 'text/csv; charset=utf-8'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting CSV: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f'Failed to export CSV: {str(e)}'}), 500
+
+
+@app.route('/api/send-to-apps-script', methods=['POST'])
+def send_to_apps_script():
+    """Send data to Google Apps Script web app"""
+    try:
+        import requests
+        
+        data = request.get_json()
+        apps_script_url = data.get('apps_script_url', '').strip()
+        
+        if not apps_script_url:
+            return jsonify({'error': 'Apps Script web app URL is required'}), 400
+        
+        # Validate URL
+        if not apps_script_url.startswith('https://script.google.com'):
+            return jsonify({'error': 'Invalid Apps Script URL. Must start with https://script.google.com'}), 400
+        
+        # Get client from session or global
+        client = get_client_for_request()
+        
+        if not client:
+            return jsonify({'error': 'HeyReach API key not set. Please enter your API key first.'}), 400
+        
+        # Get query parameters for date range
+        sender_id = data.get('sender_id', 'all')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        # If no dates provided, default to last 7 days
+        if not start_date or not end_date:
+            end_date_obj = datetime.now()
+            start_date_obj = end_date_obj - timedelta(days=7)
+            start_date = start_date_obj.strftime('%Y-%m-%d')
+            end_date = end_date_obj.strftime('%Y-%m-%d')
+        
+        # Get performance data
+        performance_data = client.get_sender_weekly_performance(
+            sender_id=None if sender_id == 'all' else sender_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        if not performance_data or not performance_data.get('senders'):
+            return jsonify({'error': 'No data available for the selected date range'}), 400
+        
+        # Format data for Apps Script
+        formatted_data = {
+            'date_range': {
+                'start': start_date,
+                'end': end_date
+            },
+            'senders': []
+        }
+        
+        for sender_name, weeks_data in performance_data.get('senders', {}).items():
+            sender_data = {
+                'name': sender_name,
+                'weeks': weeks_data
+            }
+            formatted_data['senders'].append(sender_data)
+        
+        # Send to Apps Script
+        try:
+            response = requests.post(
+                apps_script_url,
+                json=formatted_data,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            return jsonify({
+                'success': True,
+                'message': f'Data sent successfully to Apps Script. {len(formatted_data["senders"])} senders processed.',
+                'response': response.text[:200] if response.text else 'Success'
+            })
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error sending to Apps Script: {e}")
+            return jsonify({
+                'error': f'Failed to send data to Apps Script: {str(e)}',
+                'hint': 'Make sure your Apps Script web app is deployed and accessible.'
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"Error sending to Apps Script: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f'Failed to send data: {str(e)}'}), 500
 
 
 @app.route('/api/populate-sheets', methods=['POST'])
