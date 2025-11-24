@@ -1020,7 +1020,7 @@ class HeyReachClient:
                 logger.debug(f"Final processed response keys: {list(data.keys())}")
                 # Log key metrics
                 if 'connectionsSent' in data or 'connectionsAccepted' in data:
-                    logger.info(f"Final key metrics: connectionsSent={data.get('connectionsSent', 0)}, connectionsAccepted={data.get('connectionsAccepted', 0)}, messagesSent={data.get('messagesSent', 0)}, totalMessageReplies={data.get('totalMessageReplies', 0)}, totalMessageStarted={data.get('totalMessageStarted', 0)}")
+                    logger.info(f"Final key metrics: connectionsSent={data.get('connectionsSent', 0)}, connectionsAccepted={data.get('connectionsAccepted', 0)}, totalMessageStarted={data.get('totalMessageStarted', 0)} (messages_sent), totalMessageReplies={data.get('totalMessageReplies', 0)}")
             
             return data if data else {}
         except Exception as e:
