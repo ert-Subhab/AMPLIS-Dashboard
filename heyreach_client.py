@@ -937,7 +937,7 @@ class HeyReachClient:
             "endDate": end_date
         }
         
-        logger.debug(f"Request data: accountIds={processed_account_ids}, startDate={start_date}, endDate={end_date}")
+        logger.info(f"📡 GetOverallStats API Request: accountIds={processed_account_ids} (type: {[type(x).__name__ for x in processed_account_ids]}), campaignIds={processed_campaign_ids}, startDate={start_date}, endDate={end_date}")
         
         # Set headers according to HeyReach API documentation
         # The API documentation specifies Accept: text/plain
