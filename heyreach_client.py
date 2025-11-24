@@ -1214,6 +1214,11 @@ class HeyReachClient:
             'leads_not_enrolled': 0
         }))
         
+        # Store week objects by key for later use in formatting
+        week_objects_by_key = {}
+        for week in weeks:
+            week_objects_by_key[week['key']] = week
+        
         # Use parallel processing for API calls to avoid timeout when "all" is selected
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
@@ -1503,7 +1508,7 @@ class HeyReachClient:
         }
         
         # Helper function to format weeks data
-        def format_weeks_data(weekly_data_dict):
+        def format_weeks_data(weekly_data_dict, week_objects_dict=None):
             """Format weekly data into the response format"""
             sorted_weeks = sorted(weekly_data_dict.keys())
             formatted_weeks = []
@@ -1517,8 +1522,18 @@ class HeyReachClient:
                 acceptance_rate = (connections_accepted / connections_sent * 100) if connections_sent > 0 else 0
                 reply_rate = (message_replies / messages_sent * 100) if messages_sent > 0 else 0
                 
+                # Get actual week start and end dates from week_objects_dict if available
+                week_start_str = week_key  # Default to week_key (which is Friday)
+                week_end_str = week_key    # Default to week_key
+                
+                if week_objects_dict and week_key in week_objects_dict:
+                    week_obj = week_objects_dict[week_key]
+                    week_start_str = week_obj['start'].strftime('%Y-%m-%d')
+                    week_end_str = week_obj['end'].strftime('%Y-%m-%d')
+                
                 formatted_weeks.append({
-                    'week_start': week_key,  # This is now Friday (end date) instead of Saturday
+                    'week_start': week_start_str,  # Saturday (start of week)
+                    'week_end': week_end_str,      # Friday (end of week) - this is what we display
                     'connections_sent': int(connections_sent),
                     'connections_accepted': int(connections_accepted),
                     'acceptance_rate': round(acceptance_rate, 2),
@@ -1558,7 +1573,7 @@ class HeyReachClient:
             result['clients'][client_name] = {}
             
             for sender_name, weekly_data in client_senders.items():
-                formatted_weeks = format_weeks_data(weekly_data)
+                formatted_weeks = format_weeks_data(weekly_data, week_objects_by_key)
                 result['clients'][client_name][sender_name] = formatted_weeks
                 # Also add to main senders dict for backward compatibility
                 # Only add if not already present (to avoid duplicates)
@@ -1567,7 +1582,7 @@ class HeyReachClient:
         
         # Process senders without a client
         for sender_name, weekly_data in senders_without_client:
-            result['senders'][sender_name] = format_weeks_data(weekly_data)
+            result['senders'][sender_name] = format_weeks_data(weekly_data, week_objects_by_key)
         
         # Log summary
         logger.info(f"📊 Formatted data: {len(result['senders'])} senders, {len(result['clients'])} clients")

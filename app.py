@@ -928,6 +928,15 @@ def send_to_apps_script():
             }
             formatted_data['senders'].append(sender_data)
         
+        # Log the data being sent (first sender only for brevity)
+        if formatted_data.get('senders') and len(formatted_data['senders']) > 0:
+            first_sender = formatted_data['senders'][0]
+            logger.info(f"Sending to Apps Script: {len(formatted_data['senders'])} senders")
+            logger.info(f"First sender example: name='{first_sender.get('name')}', id={first_sender.get('sender_id')}, weeks={len(first_sender.get('weeks', []))}")
+            if first_sender.get('weeks') and len(first_sender['weeks']) > 0:
+                first_week = first_sender['weeks'][0]
+                logger.info(f"First week example: week_start='{first_week.get('week_start')}', week_end='{first_week.get('week_end')}', keys={list(first_week.keys())}")
+        
         # Send to Apps Script
         try:
             response = requests.post(
@@ -937,10 +946,17 @@ def send_to_apps_script():
             )
             response.raise_for_status()
             
+            # Parse response to get detailed results
+            try:
+                response_data = response.json()
+                logger.info(f"Apps Script response: {response_data}")
+            except:
+                logger.info(f"Apps Script response (text): {response.text[:500]}")
+            
             return jsonify({
                 'success': True,
                 'message': f'Data sent successfully to Apps Script. {len(formatted_data["senders"])} senders processed.',
-                'response': response.text[:200] if response.text else 'Success'
+                'response': response.text[:500] if response.text else 'Success'
             })
         except requests.exceptions.RequestException as e:
             logger.error(f"Error sending to Apps Script: {e}")

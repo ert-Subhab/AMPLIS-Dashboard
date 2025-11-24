@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Manager - Client Task Tracking</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/task_manager.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1><i class="fas fa-tasks"></i> Task Manager</h1>
+            </div>
+            
+            <!-- Client List -->
+            <div class="clients-section">
+                <div class="section-header">
+                    <h2>Clients</h2>
+                    <button class="btn-icon" id="addClientBtn" title="Add Client">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                </div>
+                <div class="client-list" id="clientList">
+                    <!-- Clients will be loaded here -->
+                </div>
+            </div>
+            
+            <!-- Filters -->
+            <div class="filters-section">
+                <h2>Filters</h2>
+                <div class="filter-group">
+                    <label>Status</label>
+                    <select id="statusFilter" class="filter-select">
+                        <option value="">All</option>
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Priority</label>
+                    <select id="priorityFilter" class="filter-select">
+                        <option value="">All</option>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Date Range</label>
+                    <input type="date" id="startDateFilter" class="filter-input">
+                    <input type="date" id="endDateFilter" class="filter-input">
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="content-header">
+                <div class="header-left">
+                    <div class="view-toggle">
+                        <button class="view-btn active" id="tasksViewBtn" data-view="tasks">
+                            <i class="fas fa-tasks"></i> Tasks
+                        </button>
+                        <button class="view-btn" id="notesViewBtn" data-view="notes">
+                            <i class="fas fa-file-alt"></i> Notes
+                        </button>
+                    </div>
+                    <h2 id="currentClientName">All Tasks</h2>
+                    <span class="task-count" id="taskCount">0 tasks</span>
+                </div>
+                <div class="header-right">
+                    <!-- Search -->
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="searchInput" placeholder="Search...">
+                    </div>
+                    <!-- Voice Input -->
+                    <button class="btn-voice" id="voiceBtn" title="Voice Input">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <!-- AI Extract -->
+                    <button class="btn-primary" id="aiExtractBtn" title="Extract Tasks from Text">
+                        <i class="fas fa-magic"></i> AI Extract
+                    </button>
+                    <!-- Add Task/Note -->
+                    <button class="btn-primary" id="addTaskBtn">
+                        <i class="fas fa-plus"></i> <span id="addButtonText">Add Task</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Task List View -->
+            <div class="task-list-container view-panel" id="tasksView">
+                <div class="task-list" id="taskList">
+                    <!-- Tasks will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Notes/Documents View (Notion-like) -->
+            <div class="notes-view-container view-panel" id="notesView" style="display: none;">
+                <div class="notes-sidebar">
+                    <div class="notes-header">
+                        <h3>Documents</h3>
+                        <button class="btn-icon" id="addNoteBtn" title="New Document">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <div class="notes-list" id="notesList">
+                        <!-- Notes will be loaded here -->
+                    </div>
+                </div>
+                <div class="editor-container">
+                    <div class="editor-header" id="editorHeader" style="display: none;">
+                        <input type="text" id="noteTitleInput" class="note-title-input" placeholder="Untitled">
+                        <div class="editor-actions">
+                            <button class="btn-icon" id="saveNoteBtn" title="Save">
+                                <i class="fas fa-save"></i>
+                            </button>
+                            <button class="btn-icon" id="deleteNoteBtn" title="Delete">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="editor-content" id="editorContent">
+                        <div class="empty-editor">
+                            <i class="fas fa-file-alt"></i>
+                            <h3>Select a document or create a new one</h3>
+                            <p>Start typing to create content blocks</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <!-- Add/Edit Client Modal -->
+    <div id="clientModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="clientModalTitle">Add Client</h3>
+                <button class="modal-close" id="closeClientModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="clientForm">
+                    <div class="form-group">
+                        <label>Client Name *</label>
+                        <input type="text" id="clientName" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="clientDescription" rows="3"></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" id="cancelClientBtn">Cancel</button>
+                        <button type="submit" class="btn-primary">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Task Modal -->
+    <div id="taskModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="taskModalTitle">Add Task</h3>
+                <button class="modal-close" id="closeTaskModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="taskForm">
+                    <div class="form-group">
+                        <label>Client *</label>
+                        <select id="taskClientId" required>
+                            <option value="">Select Client</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Task Title *</label>
+                        <input type="text" id="taskTitle" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="taskDescription" rows="4"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select id="taskStatus">
+                                <option value="pending">Pending</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="completed">Completed</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Priority</label>
+                            <select id="taskPriority">
+                                <option value="low">Low</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="high">High</option>
+                                <option value="urgent">Urgent</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Due Date</label>
+                        <input type="date" id="taskDueDate">
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" id="cancelTaskBtn">Cancel</button>
+                        <button type="submit" class="btn-primary">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Extract Modal -->
+    <div id="aiExtractModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3>Extract Tasks from Text</h3>
+                <button class="modal-close" id="closeAiExtractModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Client (optional)</label>
+                    <select id="aiExtractClient">
+                        <option value="">Select Client</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Paste your Grain call log, email, or any text</label>
+                    <textarea id="aiExtractText" rows="15" placeholder="Paste your text here..."></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" id="cancelAiExtractBtn">Cancel</button>
+                    <button type="button" class="btn-primary" id="extractTasksBtn">
+                        <i class="fas fa-magic"></i> Extract Tasks
+                    </button>
+                </div>
+                <div id="extractedTasksContainer" style="display: none; margin-top: 20px;">
+                    <h4>Extracted Tasks:</h4>
+                    <div id="extractedTasksList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Voice Input Modal -->
+    <div id="voiceModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Voice Input</h3>
+                <button class="modal-close" id="closeVoiceModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="voice-input-container">
+                    <button class="btn-voice-large" id="startRecordingBtn">
+                        <i class="fas fa-microphone"></i>
+                        <span>Click to Start Recording</span>
+                    </button>
+                    <div id="recordingStatus" style="display: none;">
+                        <div class="recording-indicator">
+                            <span class="pulse"></span>
+                            <span>Recording... Click to stop</span>
+                        </div>
+                    </div>
+                    <div id="voiceTextResult" style="display: none; margin-top: 20px;">
+                        <p><strong>Recognized:</strong></p>
+                        <p id="voiceText"></p>
+                        <button class="btn-primary" id="createTaskFromVoiceBtn" style="margin-top: 10px;">
+                            Create Task
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/task_manager.js') }}"></script>
+</body>
+</html>
+

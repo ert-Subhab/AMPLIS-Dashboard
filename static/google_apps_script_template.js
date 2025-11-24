@@ -21,21 +21,50 @@
 function doPost(e) {
   try {
     // Parse incoming data
-    const data = JSON.parse(e.postData.contents);
+    let data;
+    try {
+      data = JSON.parse(e.postData.contents);
+    } catch (parseError) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        error: 'Failed to parse JSON data: ' + parseError.toString(),
+        received_data: e.postData ? e.postData.contents.substring(0, 500) : 'No data received'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Validate data structure
+    if (!data.senders || !Array.isArray(data.senders)) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        error: 'Invalid data structure: senders array is missing or invalid',
+        data_keys: Object.keys(data)
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
     const allSheets = spreadsheet.getSheets();
     
     const results = {
       success: true,
       processed_sheets: [],
-      errors: []
+      errors: [],
+      debug_info: {
+        total_senders: data.senders.length,
+        total_sheets: allSheets.length,
+        sheet_names: allSheets.map(s => s.getName())
+      }
     };
     
     // Process each sender
-    data.senders.forEach(sender => {
+    data.senders.forEach((sender, senderIdx) => {
       const senderName = sender.name;
       const senderId = sender.sender_id;
       const weeks = sender.weeks || [];
+      
+      if (!senderName) {
+        results.errors.push(`Sender at index ${senderIdx} has no name`);
+        return;
+      }
       
       if (weeks.length === 0) {
         results.errors.push(`Sender "${senderName}" has no week data to process`);
@@ -66,19 +95,31 @@ function doPost(e) {
                 sender_id: senderId,
                 found_by: senderInfo.found_by,
                 weeks_updated: updateResult.weeks_updated,
-                cells_updated: updateResult.cells_updated
+                cells_updated: updateResult.cells_updated,
+                weeks_count: weeks.length
               });
             } catch (error) {
               results.errors.push(`Error populating data for ${senderName} (ID: ${senderId}) in sheet "${sheetName}": ${error.toString()}`);
+              if (error.stack) {
+                results.errors.push(`Stack trace: ${error.stack.substring(0, 500)}`);
+              }
             }
           }
         } catch (error) {
           results.errors.push(`Error searching for ${senderName} in sheet "${sheetName}": ${error.toString()}`);
+          if (error.stack) {
+            results.errors.push(`Stack trace: ${error.stack.substring(0, 500)}`);
+          }
         }
       }
       
       if (!senderFound) {
         results.errors.push(`Sender "${senderName}" (ID: ${senderId}) not found in any sheet. Make sure the sender name matches exactly (case-insensitive) in column A of one of the sheets.`);
+        results.debug_info[`sender_${senderIdx}_search_failed`] = {
+          name: senderName,
+          id: senderId,
+          weeks_count: weeks.length
+        };
       }
     });
     
@@ -242,12 +283,17 @@ function isSenderName(cellValue, allValues, rowIdx) {
  * Populate sender data in the sheet
  */
 function populateSenderData(sheet, senderInfo, weeks, dateRange) {
-  const allValues = sheet.getDataRange().getValues();
-  const senderRow = senderInfo.row; // 1-indexed
-  const result = {
-    weeks_updated: 0,
-    cells_updated: 0
-  };
+  try {
+    const allValues = sheet.getDataRange().getValues();
+    const senderRow = senderInfo.row; // 1-indexed
+    const result = {
+      weeks_updated: 0,
+      cells_updated: 0
+    };
+    
+    if (!weeks || weeks.length === 0) {
+      throw new Error('No weeks data provided');
+    }
   
   // Get or create header row (row 1)
   let headerRow = allValues[0] || [];
@@ -304,12 +350,26 @@ function populateSenderData(sheet, senderInfo, weeks, dateRange) {
       sheet.getRange(metricRow, 1).setValue(metric.name);
     }
     
-    // Populate data for each week
-    for (const week of weeks) {
-      const weekKey = formatWeekDate(week.week_end || week.week_start);
-      const weekCol = weekColumns[weekKey];
-      
-      if (!weekCol) continue;
+            // Populate data for each week
+            for (const week of weeks) {
+              // Use week_end if available (Friday), otherwise fall back to week_start
+              const weekDate = week.week_end || week.week_start;
+              if (!weekDate) {
+                // Skip if no date available
+                continue;
+              }
+              
+              const weekKey = formatWeekDate(weekDate);
+              if (!weekKey) {
+                continue; // Skip if date formatting failed
+              }
+              
+              const weekCol = weekColumns[weekKey];
+              
+              if (!weekCol) {
+                // Week column not found or created - this shouldn't happen, but log it
+                continue;
+              }
       
       // Get current value from the sheet (refresh to get latest)
       const cellRange = sheet.getRange(metricRow, weekCol);
@@ -347,8 +407,12 @@ function populateSenderData(sheet, senderInfo, weeks, dateRange) {
     }
   }
   
-  result.weeks_updated = Object.keys(weekColumns).length;
-  return result;
+    result.weeks_updated = Object.keys(weekColumns).length;
+    return result;
+  } catch (error) {
+    // Re-throw with more context
+    throw new Error(`populateSenderData failed: ${error.toString()}. Sender row: ${senderInfo.row}, Weeks count: ${weeks ? weeks.length : 0}`);
+  }
 }
 
 /**
@@ -376,9 +440,16 @@ function findOrCreateWeekColumns(sheet, headerRow, weeks) {
 
   // Process each week (use week_end which is Friday, not week_start)
   for (const week of weeks) {
-    const weekKey = formatWeekDate(week.week_end || week.week_start);
+    // Use week_end if available (Friday), otherwise fall back to week_start
+    const weekDate = week.week_end || week.week_start;
+    if (!weekDate) {
+      continue; // Skip if no date available
+    }
     
-    if (!weekKey) continue; // Skip if week key is invalid
+    const weekKey = formatWeekDate(weekDate);
+    if (!weekKey) {
+      continue; // Skip if date formatting failed
+    }
     
     // Check if week column already exists
     let foundCol = null;
