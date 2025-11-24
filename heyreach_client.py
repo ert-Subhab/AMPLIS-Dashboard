@@ -798,7 +798,7 @@ class HeyReachClient:
                 weeks.append({
                     'start': effective_start,
                     'end': effective_end,
-                    'key': current_week_start.strftime('%Y-%m-%d')  # Use Saturday as week identifier
+                    'key': week_end.strftime('%Y-%m-%d')  # Use Friday (end date) as week identifier
                 })
             
             # Move to next Saturday
@@ -1092,7 +1092,13 @@ class HeyReachClient:
         if self.manual_sender_ids and len(self.manual_sender_ids) > 0:
             logger.info(f"Using {len(self.manual_sender_ids)} manually configured sender IDs")
             for sender_id_val in self.manual_sender_ids:
-                sender_name = self.manual_sender_names.get(sender_id_val, f'Sender {sender_id_val}')
+                # Try both int and original format for lookup
+                sender_id_int = int(sender_id_val) if isinstance(sender_id_val, (str, float)) else sender_id_val
+                sender_name = (
+                    self.manual_sender_names.get(sender_id_int) or 
+                    self.manual_sender_names.get(sender_id_val) or 
+                    f'Sender {sender_id_val}'
+                )
                 linkedin_accounts.append({
                     'id': sender_id_val,
                     'linkedInUserListName': sender_name,
@@ -1190,7 +1196,7 @@ class HeyReachClient:
                 weeks.append({
                     'start': effective_start,
                     'end': effective_end,
-                    'key': current_week_start.strftime('%Y-%m-%d')  # Use Saturday as week identifier
+                    'key': week_end.strftime('%Y-%m-%d')  # Use Friday (end date) as week identifier
                 })
             
             # Move to next Saturday
@@ -1216,13 +1222,34 @@ class HeyReachClient:
             account_id = account.get('id')
             account_id_int = int(account_id) if account_id and isinstance(account_id, (str, float)) else account_id
             
-            sender_name = (
-                self.manual_sender_names.get(account_id_int) or 
-                self.manual_sender_names.get(account_id) or
-                account.get('linkedInUserListName') or 
-                account.get('name') or 
-                f"Account {account_id}"
-            )
+            # Get sender name with proper fallback order
+            # Priority: 1) manual_sender_names (config.yaml), 2) account name from API, 3) fallback
+            sender_name = None
+            
+            # First try manual_sender_names (from config.yaml) - this is the most reliable
+            if account_id_int:
+                sender_name = self.manual_sender_names.get(account_id_int)
+            if not sender_name and account_id:
+                sender_name = self.manual_sender_names.get(account_id)
+            
+            # If not in config, use account name from API (which should already be mapped)
+            if not sender_name:
+                sender_name = account.get('linkedInUserListName') or account.get('name')
+            
+            # Final fallback - but this should rarely happen if config.yaml is set up correctly
+            if not sender_name:
+                sender_name = f"Sender {account_id}"
+            
+            # Double-check: if we used fallback but the name exists in manual_sender_names, use it
+            if sender_name and sender_name.startswith('Sender ') and account_id_int:
+                # Check if we should have found it in manual_sender_names
+                expected_name = self.manual_sender_names.get(account_id_int) or self.manual_sender_names.get(account_id)
+                if expected_name:
+                    logger.warning(f"⚠️ Sender name lookup failed for ID {account_id} (int: {account_id_int}), but found in manual_sender_names: {expected_name}. Using expected name instead of fallback.")
+                    # Use the expected name instead
+                    sender_name = expected_name
+                elif len(self.manual_sender_names) > 0:
+                    logger.debug(f"Sender ID {account_id} (int: {account_id_int}) not found in manual_sender_names (has {len(self.manual_sender_names)} entries). Available keys: {list(self.manual_sender_names.keys())[:10]}...")
             
             week_start_iso = week['start'].strftime('%Y-%m-%dT00:00:00.000Z')
             week_end_iso = week['end'].strftime('%Y-%m-%dT23:59:59.999Z')
@@ -1491,7 +1518,7 @@ class HeyReachClient:
                 reply_rate = (message_replies / messages_sent * 100) if messages_sent > 0 else 0
                 
                 formatted_weeks.append({
-                    'week_start': week_key,
+                    'week_start': week_key,  # This is now Friday (end date) instead of Saturday
                     'connections_sent': int(connections_sent),
                     'connections_accepted': int(connections_accepted),
                     'acceptance_rate': round(acceptance_rate, 2),
