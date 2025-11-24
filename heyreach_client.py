@@ -1109,8 +1109,18 @@ class HeyReachClient:
         # Get stats for each sender and each week
         for account in linkedin_accounts:
             account_id = account.get('id')
+            # Convert account_id to int for lookup if needed
+            account_id_int = int(account_id) if account_id and isinstance(account_id, (str, float)) else account_id
+            
             # Prioritize name from config.yaml (manual_sender_names), then API response
-            sender_name = self.manual_sender_names.get(account_id) or account.get('linkedInUserListName') or account.get('name') or f"Account {account_id}"
+            # Try both int and original format for lookup
+            sender_name = (
+                self.manual_sender_names.get(account_id_int) or 
+                self.manual_sender_names.get(account_id) or
+                account.get('linkedInUserListName') or 
+                account.get('name') or 
+                f"Account {account_id}"
+            )
             
             logger.info(f"Fetching stats for sender: {sender_name} (ID: {account_id})")
             

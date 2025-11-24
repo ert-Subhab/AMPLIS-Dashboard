@@ -361,8 +361,17 @@ def initialize_api_key():
             if not sender_id:
                 continue
             
-            # Try to get name from config.yaml first, then from API response
-            sender_name = sender_names.get(sender_id) or acc.get('linkedInUserListName') or acc.get('name') or f'Sender {sender_id}'
+            # Convert sender_id to int for lookup if needed (config.yaml uses int keys)
+            sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
+            
+            # Try to get name from config.yaml first (try both int and original format), then from API response
+            sender_name = (
+                sender_names.get(sender_id_int) or 
+                sender_names.get(sender_id) or 
+                acc.get('linkedInUserListName') or 
+                acc.get('name') or 
+                f'Sender {sender_id}'
+            )
             
             senders.append({
                 'id': sender_id,
@@ -420,13 +429,31 @@ def get_senders():
             logger.warning("No LinkedIn accounts returned from API")
             return jsonify({'senders': [{'id': 'all', 'name': 'All'}], 'warning': 'No senders found'}), 200
         
-        senders = [
-            {
-                'id': acc.get('id'),
-                'name': acc.get('linkedInUserListName', acc.get('name', 'Unknown'))
-            }
-            for acc in accounts if acc.get('id')
-        ]
+        # Map sender IDs to names from config.yaml
+        sender_names = session.get('sender_names', {})
+        
+        senders = []
+        for acc in accounts:
+            sender_id = acc.get('id')
+            if not sender_id:
+                continue
+            
+            # Convert sender_id to int for lookup if needed (config.yaml uses int keys)
+            sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
+            
+            # Try to get name from config.yaml first, then from API response
+            sender_name = (
+                sender_names.get(sender_id_int) or 
+                sender_names.get(sender_id) or 
+                acc.get('linkedInUserListName') or 
+                acc.get('name') or 
+                f'Sender {sender_id}'
+            )
+            
+            senders.append({
+                'id': sender_id,
+                'name': sender_name
+            })
         
         # Add "All" option
         senders.insert(0, {'id': 'all', 'name': 'All'})
