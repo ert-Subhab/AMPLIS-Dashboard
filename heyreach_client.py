@@ -40,6 +40,31 @@ class HeyReachClient:
             "Accept": "application/json"
         }
         
+        # Create a session for connection pooling and reuse
+        # This significantly improves performance for multiple API calls
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
+        
+        # Configure connection pooling
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        
+        # Retry strategy for transient errors
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=0.3,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET", "POST"]
+        )
+        
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=20,  # Number of connection pools to cache
+            pool_maxsize=20,      # Maximum number of connections to save in the pool
+        )
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        
         # Store working endpoints (discovered dynamically)
         self.working_endpoints = {}
         self.manual_sender_ids = sender_ids or []  # Manually configured sender IDs
@@ -81,13 +106,14 @@ class HeyReachClient:
         request_headers = headers or self.headers
         
         try:
-            response = requests.request(
+            # Use session for connection pooling and reuse
+            response = self.session.request(
                 method=method,
                 url=url,
                 headers=request_headers,
                 params=params,
                 json=data,
-                timeout=30
+                timeout=(10, 60)  # (connect timeout, read timeout) - increased read timeout for large responses
             )
             
             # Log detailed error information for debugging
