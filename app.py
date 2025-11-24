@@ -11,6 +11,7 @@ from flask import Flask, render_template, jsonify, request, session
 from flask_cors import CORS
 import logging
 from heyreach_client import HeyReachClient
+from sheets_client import SheetsClient
 import secrets
 
 # Configure logging
@@ -637,6 +638,106 @@ def get_summary():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/populate-sheets', methods=['POST'])
+def populate_sheets():
+    """Populate Google Sheets with HeyReach data"""
+    try:
+        data = request.get_json()
+        sheets_url = data.get('sheets_url')
+        
+        if not sheets_url:
+            return jsonify({'error': 'Google Sheets URL is required'}), 400
+        
+        # Get client from session or global
+        client = get_client_for_request()
+        
+        if not client:
+            return jsonify({'error': 'HeyReach API key not set. Please enter your API key first.'}), 400
+        
+        # Get query parameters for date range
+        sender_id = data.get('sender_id', 'all')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        # If no dates provided, default to last 7 days
+        if not start_date or not end_date:
+            end_date_obj = datetime.now()
+            start_date_obj = end_date_obj - timedelta(days=7)
+            start_date = start_date_obj.strftime('%Y-%m-%d')
+            end_date = end_date_obj.strftime('%Y-%m-%d')
+        
+        # Get performance data from HeyReach
+        performance_data = client.get_sender_weekly_performance(
+            sender_id=None if sender_id == 'all' else sender_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        if not performance_data or not performance_data.get('senders'):
+            return jsonify({
+                'error': 'No HeyReach data available for the selected date range',
+                'updated': 0
+            }), 200
+        
+        # Initialize Sheets client
+        try:
+            sheets_client = SheetsClient(sheets_url)
+        except Exception as e:
+            logger.error(f"Error initializing Sheets client: {e}")
+            return jsonify({'error': f'Failed to connect to Google Sheets: {str(e)}'}), 400
+        
+        # Get all worksheets
+        worksheet_names = sheets_client.get_worksheet_names()
+        
+        if not worksheet_names:
+            return jsonify({'error': 'No worksheets found in the Google Sheet'}), 400
+        
+        # Populate each worksheet
+        all_results = {
+            'updated': 0,
+            'errors': [],
+            'worksheets': {}
+        }
+        
+        for worksheet_name in worksheet_names:
+            try:
+                logger.info(f"Populating worksheet: {worksheet_name}")
+                results = sheets_client.populate_heyreach_data(
+                    worksheet_name=worksheet_name,
+                    heyreach_data=performance_data,
+                    date_range=(start_date, end_date)
+                )
+                
+                all_results['updated'] += results['updated']
+                all_results['errors'].extend(results['errors'])
+                all_results['worksheets'][worksheet_name] = {
+                    'updated': results['updated'],
+                    'errors': results['errors']
+                }
+            except Exception as e:
+                error_msg = f"Error populating worksheet '{worksheet_name}': {str(e)}"
+                logger.error(error_msg)
+                all_results['errors'].append(error_msg)
+                all_results['worksheets'][worksheet_name] = {
+                    'updated': 0,
+                    'errors': [error_msg]
+                }
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully updated {all_results["updated"]} cells across {len(worksheet_names)} worksheet(s)',
+            'updated': all_results['updated'],
+            'worksheets': all_results['worksheets'],
+            'errors': all_results['errors']
+        })
+        
+    except Exception as e:
+        logger.error(f"Error populating sheets: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f'Failed to populate sheets: {str(e)}'}), 500
 
 
 @app.route('/api/health', methods=['GET'])

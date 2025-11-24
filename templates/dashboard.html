@@ -35,6 +35,22 @@
             </div>
         </div>
         
+        <!-- Google Sheets Section -->
+        <div class="api-key-section" id="sheetsSection" style="display: none;">
+            <div class="api-key-container">
+                <h2>Google Sheets Integration (Optional)</h2>
+                <div class="filter-group">
+                    <label for="sheetsUrlInput">Google Sheets URL:</label>
+                    <input type="text" id="sheetsUrlInput" class="filter-input" placeholder="https://docs.google.com/spreadsheets/d/..." style="width: 100%;">
+                    <small style="color: #666; margin-top: 5px; display: block;">Paste the Google Sheets URL to automatically populate data. The sheet must be publicly accessible or you need service account credentials.</small>
+                </div>
+                <div class="filter-group">
+                    <button id="populateSheetsBtn" class="btn btn-primary">Populate Sheets with HeyReach Data</button>
+                    <small style="color: #666; margin-top: 5px; display: block;">This will populate the selected date range data into the Google Sheet, matching senders by name.</small>
+                </div>
+            </div>
+        </div>
+        
         <!-- Change API Key Button (shown after connection) -->
         <div class="api-key-change-section" id="apiKeyChangeSection" style="display: none;">
             <button id="changeApiKeyBtn" class="btn" style="background-color: #6c757d; color: white; margin-bottom: 10px;">Change API Key</button>

@@ -25,6 +25,7 @@ async function initializeDashboard() {
         document.getElementById('toggleApiKeyBtn').addEventListener('click', toggleApiKeyVisibility);
         document.getElementById('applyFiltersBtn').addEventListener('click', loadPerformanceData);
         document.getElementById('refreshBtn').addEventListener('click', loadPerformanceData);
+        document.getElementById('populateSheetsBtn').addEventListener('click', populateSheets);
         
         // Allow Enter key to submit API key
         document.getElementById('apiKeyInput').addEventListener('keypress', function(e) {
@@ -76,6 +77,7 @@ async function initializeApiKey() {
         document.getElementById('apiKeySection').style.display = 'none';
         document.getElementById('apiKeyChangeSection').style.display = 'block';
         document.getElementById('filtersSection').style.display = 'flex';
+        document.getElementById('sheetsSection').style.display = 'block';
         
         // Populate senders dropdown
         const senderSelect = document.getElementById('senderSelect');
@@ -573,6 +575,7 @@ function changeApiKey() {
     document.getElementById('apiKeySection').style.display = 'block';
     document.getElementById('apiKeyChangeSection').style.display = 'none';
     document.getElementById('filtersSection').style.display = 'none';
+    document.getElementById('sheetsSection').style.display = 'none';
     document.getElementById('apiKeyInput').value = '';
     document.getElementById('apiKeyInput').focus();
     hideMessage();
@@ -589,5 +592,84 @@ function toggleApiKeyVisibility() {
     } else {
         apiKeyInput.type = 'password';
         toggleBtn.textContent = 'Show';
+    }
+}
+
+// Populate Google Sheets with HeyReach data
+async function populateSheets() {
+    try {
+        const sheetsUrl = document.getElementById('sheetsUrlInput').value.trim();
+        
+        if (!sheetsUrl) {
+            showError('Please enter a Google Sheets URL');
+            return;
+        }
+        
+        // Validate URL
+        if (!sheetsUrl.includes('docs.google.com/spreadsheets')) {
+            showError('Invalid Google Sheets URL. Please use a URL like: https://docs.google.com/spreadsheets/d/...');
+            return;
+        }
+        
+        // Check if API key is initialized
+        if (document.getElementById('filtersSection').style.display === 'none') {
+            showError('Please enter your HeyReach API key and connect first');
+            return;
+        }
+        
+        // Get current filters
+        const senderId = document.getElementById('senderSelect').value;
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+        
+        if (!startDate || !endDate) {
+            showError('Please select both start and end dates');
+            return;
+        }
+        
+        showLoading(true);
+        hideError();
+        
+        // Call populate sheets endpoint
+        const response = await fetch('/api/populate-sheets', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                sheets_url: sheetsUrl,
+                sender_id: senderId,
+                start_date: startDate,
+                end_date: endDate
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok || data.error) {
+            throw new Error(data.error || 'Failed to populate sheets');
+        }
+        
+        // Show success message
+        let message = data.message || `Successfully updated ${data.updated} cells`;
+        if (data.worksheets) {
+            const worksheetDetails = Object.entries(data.worksheets)
+                .map(([name, info]) => `${name}: ${info.updated} cells updated`)
+                .join(', ');
+            message += ` (${worksheetDetails})`;
+        }
+        
+        if (data.errors && data.errors.length > 0) {
+            message += `. ${data.errors.length} error(s) occurred. Check console for details.`;
+            console.warn('Sheet population errors:', data.errors);
+        }
+        
+        showMessage(message);
+        showLoading(false);
+        
+    } catch (error) {
+        console.error('Error populating sheets:', error);
+        showError('Error populating Google Sheets: ' + error.message);
+        showLoading(false);
     }
 }
