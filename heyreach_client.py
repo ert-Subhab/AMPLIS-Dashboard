@@ -1226,7 +1226,8 @@ class HeyReachClient:
         
         # Process tasks in parallel with ThreadPoolExecutor
         # Use max_workers to limit concurrent API calls (avoid overwhelming the API)
-        max_workers = min(10, len(tasks))  # Max 10 concurrent requests
+        # Increased to 20 to reduce total processing time and avoid timeouts
+        max_workers = min(20, len(tasks))  # Max 20 concurrent requests
         
         first_result_logged = False
         
