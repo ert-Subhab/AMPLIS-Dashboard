@@ -17,8 +17,31 @@
             </div>
         </header>
 
+        <!-- API Key Section -->
+        <div class="api-key-section" id="apiKeySection">
+            <div class="api-key-container">
+                <h2>HeyReach API Configuration</h2>
+                <div class="filter-group">
+                    <label for="apiKeyInput">HeyReach API Key:</label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="password" id="apiKeyInput" class="filter-input" placeholder="Enter your HeyReach API key" style="flex: 1;">
+                        <button type="button" id="toggleApiKeyBtn" class="btn" style="padding: 8px 15px; background-color: #6c757d; color: white;">Show</button>
+                    </div>
+                    <small style="color: #666; margin-top: 5px; display: block;">Your API key will be used to fetch data from HeyReach. It is stored in your browser session only.</small>
+                </div>
+                <div class="filter-group">
+                    <button id="connectBtn" class="btn btn-primary">Connect & Load Senders</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Change API Key Button (shown after connection) -->
+        <div class="api-key-change-section" id="apiKeyChangeSection" style="display: none;">
+            <button id="changeApiKeyBtn" class="btn" style="background-color: #6c757d; color: white; margin-bottom: 10px;">Change API Key</button>
+        </div>
+
         <!-- Filters -->
-        <div class="filters-section">
+        <div class="filters-section" id="filtersSection" style="display: none;">
             <div class="filter-group">
                 <label for="senderSelect">Select Sender:</label>
                 <select id="senderSelect" class="filter-input">

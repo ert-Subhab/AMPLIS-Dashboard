@@ -19,22 +19,89 @@ async function initializeDashboard() {
         document.getElementById('startDate').value = formatDate(startDate);
         document.getElementById('endDate').value = formatDate(endDate);
         
-        // Load senders dropdown (this is fast, no API calls)
-        await loadSenders();
-        
-        // DON'T automatically load performance data - wait for user to click "Apply Filters"
-        // Show a message to the user instead
-        showMessage('Please select a sender and date range, then click "Apply Filters" to load data.');
-        
         // Set up event listeners
+        document.getElementById('connectBtn').addEventListener('click', initializeApiKey);
+        document.getElementById('changeApiKeyBtn').addEventListener('click', changeApiKey);
+        document.getElementById('toggleApiKeyBtn').addEventListener('click', toggleApiKeyVisibility);
         document.getElementById('applyFiltersBtn').addEventListener('click', loadPerformanceData);
         document.getElementById('refreshBtn').addEventListener('click', loadPerformanceData);
+        
+        // Allow Enter key to submit API key
+        document.getElementById('apiKeyInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                initializeApiKey();
+            }
+        });
+        
+        // Hide filters section initially
+        document.getElementById('filtersSection').style.display = 'none';
+        document.getElementById('apiKeyChangeSection').style.display = 'none';
     } catch (error) {
         showError('Error initializing dashboard: ' + error.message);
     }
 }
 
-// Load senders
+// Initialize API key and load senders
+async function initializeApiKey() {
+    try {
+        const apiKey = document.getElementById('apiKeyInput').value.trim();
+        
+        if (!apiKey) {
+            showError('Please enter your HeyReach API key');
+            return;
+        }
+        
+        showLoading(true);
+        hideError();
+        
+        // Call initialize endpoint
+        const response = await fetch('/api/initialize', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                api_key: apiKey,
+                base_url: 'https://api.heyreach.io'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok || data.error) {
+            throw new Error(data.error || 'Failed to initialize API key');
+        }
+        
+        // Success! Show filters section and populate senders
+        document.getElementById('apiKeySection').style.display = 'none';
+        document.getElementById('apiKeyChangeSection').style.display = 'block';
+        document.getElementById('filtersSection').style.display = 'flex';
+        
+        // Populate senders dropdown
+        const senderSelect = document.getElementById('senderSelect');
+        senderSelect.innerHTML = '<option value="all">All</option>';
+        
+        if (data.senders && data.senders.length > 0) {
+            data.senders.forEach(sender => {
+                if (sender.id !== 'all') {
+                    const option = document.createElement('option');
+                    option.value = sender.id;
+                    option.textContent = sender.name;
+                    senderSelect.appendChild(option);
+                }
+            });
+        }
+        
+        showMessage(data.message || `Successfully connected! Found ${data.senders.length - 1} sender(s). Please select a sender and date range, then click "Apply Filters" to load data.`);
+        showLoading(false);
+    } catch (error) {
+        console.error('Error initializing API key:', error);
+        showError('Error connecting to HeyReach: ' + error.message);
+        showLoading(false);
+    }
+}
+
+// Load senders (called after API key is initialized)
 async function loadSenders() {
     try {
         const response = await fetch('/api/senders');
@@ -65,6 +132,13 @@ async function loadPerformanceData() {
         hideMessage(); // Hide message when user clicks to load data
         showLoading(true);
         hideError();
+        
+        // Check if filters section is visible (API key must be initialized)
+        if (document.getElementById('filtersSection').style.display === 'none') {
+            showError('Please enter your API key and connect first');
+            showLoading(false);
+            return;
+        }
         
         const senderId = document.getElementById('senderSelect').value;
         const startDate = document.getElementById('startDate').value;
@@ -479,5 +553,30 @@ function hideMessage() {
     const messageDiv = document.getElementById('messageDiv');
     if (messageDiv) {
         messageDiv.style.display = 'none';
+    }
+}
+
+// Change API key
+function changeApiKey() {
+    // Show API key section again and hide filters
+    document.getElementById('apiKeySection').style.display = 'block';
+    document.getElementById('apiKeyChangeSection').style.display = 'none';
+    document.getElementById('filtersSection').style.display = 'none';
+    document.getElementById('apiKeyInput').value = '';
+    document.getElementById('apiKeyInput').focus();
+    hideMessage();
+}
+
+// Toggle API key visibility
+function toggleApiKeyVisibility() {
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const toggleBtn = document.getElementById('toggleApiKeyBtn');
+    
+    if (apiKeyInput.type === 'password') {
+        apiKeyInput.type = 'text';
+        toggleBtn.textContent = 'Hide';
+    } else {
+        apiKeyInput.type = 'password';
+        toggleBtn.textContent = 'Show';
     }
 }

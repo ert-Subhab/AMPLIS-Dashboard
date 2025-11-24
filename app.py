@@ -7,10 +7,11 @@ Flask web application for HeyReach performance tracking
 import yaml
 import os
 from datetime import datetime, timedelta
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, session
 from flask_cors import CORS
 import logging
 from heyreach_client import HeyReachClient
+import secrets
 
 # Configure logging
 logging.basicConfig(
@@ -20,65 +21,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+app.secret_key = secrets.token_hex(16)  # Generate a secret key for sessions
 CORS(app)
 
 # Global client instance
 heyreach_client = None
-
-# Initialize client when app starts (for production deployment with gunicorn)
-def initialize_app():
-    """Initialize the HeyReach client when the app starts"""
-    global heyreach_client
-    try:
-        # Use print() to ensure logs are visible in Render
-        print("=" * 50, flush=True)
-        print("INITIALIZING HEYREACH CLIENT ON APP STARTUP", flush=True)
-        print("=" * 50, flush=True)
-        
-        api_key_present = bool(os.environ.get('HEYREACH_API_KEY'))
-        base_url = os.environ.get('HEYREACH_BASE_URL', 'Not set')
-        
-        print(f"HEYREACH_API_KEY present: {api_key_present}", flush=True)
-        print(f"HEYREACH_BASE_URL: {base_url}", flush=True)
-        
-        logger.info("=" * 50)
-        logger.info("Initializing HeyReach client on app startup...")
-        logger.info(f"HEYREACH_API_KEY present: {api_key_present}")
-        logger.info(f"HEYREACH_BASE_URL: {base_url}")
-        
-        if not heyreach_client:
-            print("Client not initialized yet, calling init_client()...", flush=True)
-            if not init_client():
-                print("=" * 50, flush=True)
-                print("CRITICAL: Failed to initialize HeyReach client!", flush=True)
-                print("Check environment variables: HEYREACH_API_KEY and HEYREACH_BASE_URL", flush=True)
-                print("=" * 50, flush=True)
-                logger.error("=" * 50)
-                logger.error("CRITICAL: Failed to initialize HeyReach client on app startup")
-                logger.error("The dashboard will not function without a valid client.")
-                logger.error("Check environment variables: HEYREACH_API_KEY and HEYREACH_BASE_URL")
-                logger.error("=" * 50)
-            else:
-                print("=" * 50, flush=True)
-                print("✅ HeyReach client initialized successfully!", flush=True)
-                print("=" * 50, flush=True)
-                logger.info("=" * 50)
-                logger.info("✅ HeyReach client initialized successfully on app startup")
-                logger.info("=" * 50)
-        else:
-            print("HeyReach client already initialized", flush=True)
-            logger.info("HeyReach client already initialized")
-    except Exception as e:
-        print(f"EXCEPTION during app initialization: {e}", flush=True)
-        import traceback
-        print(traceback.format_exc(), flush=True)
-        logger.error(f"Exception during app initialization: {e}")
-        logger.error(traceback.format_exc())
-
-# Initialize client when app is imported (for gunicorn)
-print("APP.PY: Starting initialization...", flush=True)
-initialize_app()
-print("APP.PY: Initialization complete.", flush=True)
 
 
 def load_config():
@@ -106,49 +53,70 @@ def load_config():
                 'client_groups': {}
             }
             print("load_config(): Base config created", flush=True)
-        
-        # Try to load sender_ids from environment variable (JSON format)
-        sender_ids_str = os.environ.get('HEYREACH_SENDER_IDS', '[]')
-        if sender_ids_str:
-            try:
-                import json
-                sender_ids = json.loads(sender_ids_str)
-                if isinstance(sender_ids, list):
-                    config['heyreach']['sender_ids'] = sender_ids
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("Failed to parse HEYREACH_SENDER_IDS from environment")
-        
-        # Try to load sender_names from environment variable (JSON format)
-        sender_names_str = os.environ.get('HEYREACH_SENDER_NAMES', '{}')
-        if sender_names_str:
-            try:
-                import json
-                sender_names = json.loads(sender_names_str)
-                if isinstance(sender_names, dict):
-                    # Convert string keys to integers
-                    processed_sender_names = {}
-                    for key, value in sender_names.items():
-                        try:
-                            key_int = int(key) if isinstance(key, str) else key
-                            processed_sender_names[key_int] = value
-                        except (ValueError, TypeError):
-                            processed_sender_names[key] = value
-                    config['heyreach']['sender_names'] = processed_sender_names
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("Failed to parse HEYREACH_SENDER_NAMES from environment")
-        
-        # Try to load client_groups from environment variable (JSON format)
-        client_groups_str = os.environ.get('HEYREACH_CLIENT_GROUPS', '{}')
-        if client_groups_str:
-            try:
-                import json
-                client_groups = json.loads(client_groups_str)
-                if isinstance(client_groups, dict):
-                    config['heyreach']['client_groups'] = client_groups
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("Failed to parse HEYREACH_CLIENT_GROUPS from environment")
-        
-            print(f"load_config(): Returning config with api_key: {bool(config.get('heyreach', {}).get('api_key'))}", flush=True)
+            
+            # Try to load sender_ids from environment variable (JSON format)
+            sender_ids_str = os.environ.get('HEYREACH_SENDER_IDS')
+            if sender_ids_str and sender_ids_str.strip():  # Only process if not empty
+                try:
+                    import json
+                    sender_ids = json.loads(sender_ids_str)
+                    if isinstance(sender_ids, list) and len(sender_ids) > 0:
+                        config['heyreach']['sender_ids'] = sender_ids
+                        print(f"load_config(): Loaded {len(sender_ids)} sender IDs from environment", flush=True)
+                        logger.info(f"Loaded {len(sender_ids)} sender IDs from HEYREACH_SENDER_IDS environment variable")
+                    else:
+                        print("load_config(): HEYREACH_SENDER_IDS is empty list, skipping", flush=True)
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse HEYREACH_SENDER_IDS from environment: {e}")
+                    print(f"load_config(): Failed to parse HEYREACH_SENDER_IDS: {e}", flush=True)
+            else:
+                print("load_config(): HEYREACH_SENDER_IDS not set or empty", flush=True)
+            
+            # Try to load sender_names from environment variable (JSON format)
+            sender_names_str = os.environ.get('HEYREACH_SENDER_NAMES')
+            if sender_names_str and sender_names_str.strip():  # Only process if not empty
+                try:
+                    import json
+                    sender_names = json.loads(sender_names_str)
+                    if isinstance(sender_names, dict) and len(sender_names) > 0:
+                        # Convert string keys to integers
+                        processed_sender_names = {}
+                        for key, value in sender_names.items():
+                            try:
+                                key_int = int(key) if isinstance(key, str) else key
+                                processed_sender_names[key_int] = value
+                            except (ValueError, TypeError):
+                                processed_sender_names[key] = value
+                        config['heyreach']['sender_names'] = processed_sender_names
+                        print(f"load_config(): Loaded {len(processed_sender_names)} sender names from environment", flush=True)
+                        logger.info(f"Loaded {len(processed_sender_names)} sender names from HEYREACH_SENDER_NAMES environment variable")
+                    else:
+                        print("load_config(): HEYREACH_SENDER_NAMES is empty dict, skipping", flush=True)
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse HEYREACH_SENDER_NAMES from environment: {e}")
+                    print(f"load_config(): Failed to parse HEYREACH_SENDER_NAMES: {e}", flush=True)
+            else:
+                print("load_config(): HEYREACH_SENDER_NAMES not set or empty", flush=True)
+            
+            # Try to load client_groups from environment variable (JSON format)
+            client_groups_str = os.environ.get('HEYREACH_CLIENT_GROUPS')
+            if client_groups_str and client_groups_str.strip():  # Only process if not empty
+                try:
+                    import json
+                    client_groups = json.loads(client_groups_str)
+                    if isinstance(client_groups, dict) and len(client_groups) > 0:
+                        config['heyreach']['client_groups'] = client_groups
+                        print(f"load_config(): Loaded {len(client_groups)} client groups from environment", flush=True)
+                        logger.info(f"Loaded {len(client_groups)} client groups from HEYREACH_CLIENT_GROUPS environment variable")
+                    else:
+                        print("load_config(): HEYREACH_CLIENT_GROUPS is empty dict, skipping", flush=True)
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse HEYREACH_CLIENT_GROUPS from environment: {e}")
+                    print(f"load_config(): Failed to parse HEYREACH_CLIENT_GROUPS: {e}", flush=True)
+            else:
+                print("load_config(): HEYREACH_CLIENT_GROUPS not set or empty", flush=True)
+            
+            print(f"load_config(): Returning config with api_key: {bool(config.get('heyreach', {}).get('api_key'))}, sender_ids: {len(config.get('heyreach', {}).get('sender_ids', []))}", flush=True)
             return config
         
         # Fallback to config.yaml (for local development)
@@ -236,13 +204,13 @@ def init_client():
                 sender_names=sender_names,
                 client_groups=client_groups
             )
-            print("init_client(): ✅ HeyReachClient created successfully!", flush=True)
-            logger.info("✅ HeyReach client initialized successfully")
+            print("init_client(): [OK] HeyReachClient created successfully!", flush=True)
+            logger.info("[OK] HeyReach client initialized successfully")
             if sender_ids:
-                logger.info(f"📋 Using {len(sender_ids)} manually configured sender IDs")
+                logger.info(f"[INFO] Using {len(sender_ids)} manually configured sender IDs")
                 print(f"init_client(): Using {len(sender_ids)} sender IDs", flush=True)
             if client_groups:
-                logger.info(f"📦 Loaded {len(client_groups)} client groups")
+                logger.info(f"[INFO] Loaded {len(client_groups)} client groups")
                 print(f"init_client(): Loaded {len(client_groups)} client groups", flush=True)
             return True
         except Exception as client_error:
@@ -265,31 +233,158 @@ def init_client():
         return False
 
 
+# Initialize client when app starts (for production deployment with gunicorn)
+def initialize_app():
+    """Initialize the HeyReach client when the app starts"""
+    global heyreach_client
+    try:
+        # Use print() to ensure logs are visible in Render
+        print("=" * 50, flush=True)
+        print("INITIALIZING HEYREACH CLIENT ON APP STARTUP", flush=True)
+        print("=" * 50, flush=True)
+        
+        api_key_present = bool(os.environ.get('HEYREACH_API_KEY'))
+        base_url = os.environ.get('HEYREACH_BASE_URL', 'Not set')
+        
+        print(f"HEYREACH_API_KEY present: {api_key_present}", flush=True)
+        print(f"HEYREACH_BASE_URL: {base_url}", flush=True)
+        
+        logger.info("=" * 50)
+        logger.info("Initializing HeyReach client on app startup...")
+        logger.info(f"HEYREACH_API_KEY present: {api_key_present}")
+        logger.info(f"HEYREACH_BASE_URL: {base_url}")
+        
+        if not heyreach_client:
+            print("Client not initialized yet, calling init_client()...", flush=True)
+            if not init_client():
+                print("=" * 50, flush=True)
+                print("CRITICAL: Failed to initialize HeyReach client!", flush=True)
+                print("Check environment variables: HEYREACH_API_KEY and HEYREACH_BASE_URL", flush=True)
+                print("=" * 50, flush=True)
+                logger.error("=" * 50)
+                logger.error("CRITICAL: Failed to initialize HeyReach client on app startup")
+                logger.error("The dashboard will not function without a valid client.")
+                logger.error("Check environment variables: HEYREACH_API_KEY and HEYREACH_BASE_URL")
+                logger.error("=" * 50)
+            else:
+                print("=" * 50, flush=True)
+                print("[OK] HeyReach client initialized successfully!", flush=True)
+                print("=" * 50, flush=True)
+                logger.info("=" * 50)
+                logger.info("[OK] HeyReach client initialized successfully on app startup")
+                logger.info("=" * 50)
+        else:
+            print("HeyReach client already initialized", flush=True)
+            logger.info("HeyReach client already initialized")
+    except Exception as e:
+        print(f"EXCEPTION during app initialization: {e}", flush=True)
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        logger.error(f"Exception during app initialization: {e}")
+        logger.error(traceback.format_exc())
+
+
+# Initialize client when app is imported (for gunicorn/production)
+# This happens after all functions are defined
+try:
+    print("APP.PY: Starting initialization...", flush=True)
+    initialize_app()
+    print("APP.PY: Initialization complete.", flush=True)
+except Exception as e:
+    print(f"APP.PY: Warning - initialization failed during import: {e}", flush=True)
+    logger.warning(f"Initialization failed during import: {e}")
+
+
 @app.route('/')
 def index():
     """Render dashboard homepage"""
     return render_template('dashboard.html')
 
 
+@app.route('/api/initialize', methods=['POST'])
+def initialize_api_key():
+    """Initialize HeyReach client with API key from request"""
+    try:
+        data = request.get_json()
+        api_key = data.get('api_key')
+        
+        if not api_key:
+            return jsonify({'error': 'API key is required'}), 400
+        
+        # Store API key in session
+        session['heyreach_api_key'] = api_key
+        session['heyreach_base_url'] = data.get('base_url', 'https://api.heyreach.io')
+        
+        # Create a temporary client to test the connection and fetch senders
+        temp_client = HeyReachClient(
+            api_key=api_key,
+            base_url=session['heyreach_base_url']
+        )
+        
+        # Test connection by fetching accounts
+        accounts = temp_client.get_linkedin_accounts()
+        
+        if not accounts:
+            logger.warning("No LinkedIn accounts returned from API")
+            return jsonify({
+                'success': True,
+                'senders': [{'id': 'all', 'name': 'All'}],
+                'warning': 'No senders found. API key is valid but no accounts available.'
+            }), 200
+        
+        senders = [
+            {
+                'id': acc.get('id'),
+                'name': acc.get('linkedInUserListName', acc.get('name', 'Unknown'))
+            }
+            for acc in accounts if acc.get('id')
+        ]
+        
+        # Add "All" option
+        senders.insert(0, {'id': 'all', 'name': 'All'})
+        
+        logger.info(f"Initialized API key and found {len(senders)} senders")
+        return jsonify({
+            'success': True,
+            'senders': senders,
+            'message': f'Successfully connected! Found {len(senders) - 1} sender(s).'
+        })
+    except Exception as e:
+        logger.error(f"Error initializing API key: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f'Failed to initialize API key: {str(e)}'}), 500
+
+
 @app.route('/api/senders', methods=['GET'])
 def get_senders():
     """Get list of all senders (LinkedIn accounts)"""
     try:
-        if not heyreach_client:
-            error_msg = 'HeyReach client not initialized. Check environment variables and logs.'
-            logger.error(error_msg)
-            return jsonify({'error': error_msg, 'senders': [{'id': 'all', 'name': 'All'}]}), 200
+        # Check if API key is in session
+        api_key = session.get('heyreach_api_key')
         
-        accounts = heyreach_client.get_linkedin_accounts()
+        if not api_key:
+            # Fallback to global client if available
+            if not heyreach_client:
+                error_msg = 'HeyReach API key not set. Please enter your API key first.'
+                logger.error(error_msg)
+                return jsonify({'error': error_msg, 'senders': [{'id': 'all', 'name': 'All'}]}), 200
+            
+            accounts = heyreach_client.get_linkedin_accounts()
+        else:
+            # Use session API key
+            base_url = session.get('heyreach_base_url', 'https://api.heyreach.io')
+            temp_client = HeyReachClient(api_key=api_key, base_url=base_url)
+            accounts = temp_client.get_linkedin_accounts()
+        
         if not accounts:
             logger.warning("No LinkedIn accounts returned from API")
-            # Return at least "All" option
             return jsonify({'senders': [{'id': 'all', 'name': 'All'}], 'warning': 'No senders found'}), 200
         
         senders = [
             {
                 'id': acc.get('id'),
-                'name': acc.get('linkedInUserListName', 'Unknown')
+                'name': acc.get('linkedInUserListName', acc.get('name', 'Unknown'))
             }
             for acc in accounts if acc.get('id')
         ]
@@ -303,19 +398,33 @@ def get_senders():
         logger.error(f"Error fetching senders: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        # Return at least "All" option even on error
         return jsonify({'error': str(e), 'senders': [{'id': 'all', 'name': 'All'}]}), 200
+
+
+def get_client_for_request():
+    """Get HeyReach client from session or global"""
+    api_key = session.get('heyreach_api_key')
+    
+    if api_key:
+        base_url = session.get('heyreach_base_url', 'https://api.heyreach.io')
+        return HeyReachClient(api_key=api_key, base_url=base_url)
+    elif heyreach_client:
+        return heyreach_client
+    else:
+        return None
 
 
 @app.route('/api/performance', methods=['GET'])
 def get_performance():
     """Get performance data for selected sender and date range"""
     try:
-        if not heyreach_client:
-            error_msg = 'HeyReach client not initialized. Check /api/health for details.'
+        # Get client from session or global
+        client = get_client_for_request()
+        
+        if not client:
+            error_msg = 'HeyReach API key not set. Please enter your API key first.'
             logger.error(error_msg)
             print(f"ERROR: {error_msg}", flush=True)
-            # Return empty data structure instead of error to allow dashboard to display
             return jsonify({
                 'error': error_msg,
                 'start_date': request.args.get('start_date', ''),
@@ -341,7 +450,7 @@ def get_performance():
         
         # Get performance data
         try:
-            performance_data = heyreach_client.get_sender_weekly_performance(
+            performance_data = client.get_sender_weekly_performance(
                 sender_id=sender_id_param,
                 start_date=start_date,
                 end_date=end_date
@@ -379,8 +488,11 @@ def get_performance():
 def get_summary():
     """Get summary metrics for the dashboard"""
     try:
-        if not heyreach_client:
-            return jsonify({'error': 'HeyReach client not initialized'}), 500
+        # Get client from session or global
+        client = get_client_for_request()
+        
+        if not client:
+            return jsonify({'error': 'HeyReach API key not set. Please enter your API key first.'}), 500
         
         # Get query parameters
         sender_id = request.args.get('sender_id', 'all')
@@ -395,7 +507,7 @@ def get_summary():
             end_date = end_date_obj.strftime('%Y-%m-%d')
         
         # Get performance data
-        performance_data = heyreach_client.get_sender_weekly_performance(
+        performance_data = client.get_sender_weekly_performance(
             sender_id=None if sender_id == 'all' else sender_id,
             start_date=start_date,
             end_date=end_date

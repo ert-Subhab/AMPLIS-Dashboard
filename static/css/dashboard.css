@@ -41,6 +41,27 @@ body {
     gap: 10px;
 }
 
+/* API Key Section */
+.api-key-section {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.api-key-container {
+    max-width: 600px;
+}
+
+.api-key-container h2 {
+    font-size: 20px;
+    margin-bottom: 20px;
+    color: #333;
+    border-bottom: 2px solid #667eea;
+    padding-bottom: 10px;
+}
+
 /* Filters */
 .filters-section {
     background: white;
@@ -72,6 +93,12 @@ body {
     border-radius: 4px;
     font-size: 14px;
     min-width: 150px;
+    width: 100%;
+}
+
+.filter-input[type="password"] {
+    font-family: monospace;
+    letter-spacing: 2px;
 }
 
 .filter-input:focus {
