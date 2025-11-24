@@ -30,10 +30,14 @@ async function initializeDashboard() {
         const populateBtn = document.getElementById('populateSheetsBtn');
         const connectGoogleBtn = document.getElementById('connectGoogleBtn');
         const disconnectGoogleBtn = document.getElementById('disconnectGoogleBtn');
+        const saveOAuthBtn = document.getElementById('saveOAuthCredentialsBtn');
+        const toggleOAuthSecretBtn = document.getElementById('toggleOAuthSecretBtn');
         
         if (populateBtn) populateBtn.addEventListener('click', populateSheets);
         if (connectGoogleBtn) connectGoogleBtn.addEventListener('click', connectGoogleSheets);
         if (disconnectGoogleBtn) disconnectGoogleBtn.addEventListener('click', disconnectGoogleSheets);
+        if (saveOAuthBtn) saveOAuthBtn.addEventListener('click', saveOAuthCredentials);
+        if (toggleOAuthSecretBtn) toggleOAuthSecretBtn.addEventListener('click', toggleOAuthSecretVisibility);
         
         // Check Google Sheets connection status on load
         checkGoogleSheetsStatus();
@@ -622,63 +626,146 @@ function toggleApiKeyVisibility() {
     }
 }
 
+// Toggle OAuth secret visibility
+function toggleOAuthSecretVisibility() {
+    const secretInput = document.getElementById('googleClientSecretInput');
+    const toggleBtn = document.getElementById('toggleOAuthSecretBtn');
+    
+    if (secretInput.type === 'password') {
+        secretInput.type = 'text';
+        toggleBtn.textContent = 'Hide';
+    } else {
+        secretInput.type = 'password';
+        toggleBtn.textContent = 'Show';
+    }
+}
+
+// Show OAuth help
+function showOAuthHelp() {
+    const modal = document.getElementById('oauthHelpModal');
+    if (modal) {
+        modal.style.display = 'block';
+        
+        // Update redirect URI
+        fetch('/api/google/status')
+            .then(response => response.json())
+            .then(data => {
+                if (data.redirect_uri) {
+                    const display = document.getElementById('redirectUriDisplay');
+                    if (display) {
+                        display.textContent = data.redirect_uri;
+                    }
+                }
+            });
+    }
+}
+
+// Hide OAuth help
+function hideOAuthHelp() {
+    const modal = document.getElementById('oauthHelpModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
 // Check Google Sheets connection status
 async function checkGoogleSheetsStatus() {
     try {
         const response = await fetch('/api/google/status');
         const data = await response.json();
         
+        const oauthCredentialsGroup = document.getElementById('oauthCredentialsGroup');
+        const oauthSecretGroup = document.getElementById('oauthSecretGroup');
+        const saveOAuthGroup = document.getElementById('saveOAuthCredentialsGroup');
+        const googleAuthStatus = document.getElementById('googleAuthStatus');
         const notConnectedDiv = document.getElementById('googleNotConnected');
         const connectedDiv = document.getElementById('googleConnected');
         const sheetsUrlGroup = document.getElementById('sheetsUrlGroup');
         const populateGroup = document.getElementById('populateGroup');
         
-        if (!data.configured) {
-            // OAuth not configured - show message to user
-            notConnectedDiv.style.display = 'block';
-            connectedDiv.style.display = 'none';
-            sheetsUrlGroup.style.display = 'none';
-            populateGroup.style.display = 'none';
-            
-            // Update message
-            const message = notConnectedDiv.querySelector('p') || notConnectedDiv;
-            if (message.tagName === 'P') {
-                message.textContent = 'Google Sheets integration is not configured. This feature requires administrator setup.';
-                message.style.color = '#dc3545';
+        // Update redirect URI in help modal
+        if (data.redirect_uri) {
+            const redirectUriDisplay = document.getElementById('redirectUriDisplay');
+            if (redirectUriDisplay) {
+                redirectUriDisplay.textContent = data.redirect_uri;
             }
-            
-            // Hide or disable connect button
-            const connectBtn = document.getElementById('connectGoogleBtn');
-            if (connectBtn) {
-                connectBtn.disabled = true;
-                connectBtn.textContent = 'Not Available';
-                connectBtn.style.opacity = '0.6';
-                connectBtn.style.cursor = 'not-allowed';
-            }
+        }
+        
+        if (!data.has_credentials) {
+            // User hasn't provided OAuth credentials yet
+            if (oauthCredentialsGroup) oauthCredentialsGroup.style.display = 'block';
+            if (oauthSecretGroup) oauthSecretGroup.style.display = 'block';
+            if (saveOAuthGroup) saveOAuthGroup.style.display = 'block';
+            if (googleAuthStatus) googleAuthStatus.style.display = 'none';
+            if (sheetsUrlGroup) sheetsUrlGroup.style.display = 'none';
+            if (populateGroup) populateGroup.style.display = 'none';
         } else if (data.authorized) {
-            // User is authorized
-            notConnectedDiv.style.display = 'none';
-            connectedDiv.style.display = 'block';
-            sheetsUrlGroup.style.display = 'block';
-            populateGroup.style.display = 'block';
+            // User has credentials and is authorized
+            if (oauthCredentialsGroup) oauthCredentialsGroup.style.display = 'none';
+            if (oauthSecretGroup) oauthSecretGroup.style.display = 'none';
+            if (saveOAuthGroup) saveOAuthGroup.style.display = 'none';
+            if (googleAuthStatus) googleAuthStatus.style.display = 'block';
+            if (notConnectedDiv) notConnectedDiv.style.display = 'none';
+            if (connectedDiv) connectedDiv.style.display = 'block';
+            if (sheetsUrlGroup) sheetsUrlGroup.style.display = 'block';
+            if (populateGroup) populateGroup.style.display = 'block';
         } else {
-            // OAuth configured but user not authorized
-            notConnectedDiv.style.display = 'block';
-            connectedDiv.style.display = 'none';
-            sheetsUrlGroup.style.display = 'none';
-            populateGroup.style.display = 'none';
-            
-            // Reset connect button
-            const connectBtn = document.getElementById('connectGoogleBtn');
-            if (connectBtn) {
-                connectBtn.disabled = false;
-                connectBtn.textContent = 'Connect Google Sheets';
-                connectBtn.style.opacity = '1';
-                connectBtn.style.cursor = 'pointer';
-            }
+            // User has credentials but not authorized yet
+            if (oauthCredentialsGroup) oauthCredentialsGroup.style.display = 'none';
+            if (oauthSecretGroup) oauthSecretGroup.style.display = 'none';
+            if (saveOAuthGroup) saveOAuthGroup.style.display = 'none';
+            if (googleAuthStatus) googleAuthStatus.style.display = 'block';
+            if (notConnectedDiv) notConnectedDiv.style.display = 'block';
+            if (connectedDiv) connectedDiv.style.display = 'none';
+            if (sheetsUrlGroup) sheetsUrlGroup.style.display = 'none';
+            if (populateGroup) populateGroup.style.display = 'none';
         }
     } catch (error) {
         console.error('Error checking Google Sheets status:', error);
+    }
+}
+
+// Save OAuth credentials
+async function saveOAuthCredentials() {
+    try {
+        const clientId = document.getElementById('googleClientIdInput').value.trim();
+        const clientSecret = document.getElementById('googleClientSecretInput').value.trim();
+        
+        if (!clientId || !clientSecret) {
+            showError('Please enter both Client ID and Client Secret');
+            return;
+        }
+        
+        showLoading(true);
+        hideError();
+        
+        const response = await fetch('/api/google/save-credentials', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                client_id: clientId,
+                client_secret: clientSecret
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok || data.error) {
+            throw new Error(data.error || 'Failed to save credentials');
+        }
+        
+        showMessage(data.message || 'OAuth credentials saved successfully!');
+        showLoading(false);
+        
+        // Refresh status to show connect button
+        checkGoogleSheetsStatus();
+        
+    } catch (error) {
+        console.error('Error saving OAuth credentials:', error);
+        showError('Error saving OAuth credentials: ' + error.message);
+        showLoading(false);
     }
 }
 
@@ -693,9 +780,9 @@ async function connectGoogleSheets() {
         const data = await response.json();
         
         if (!response.ok) {
-            if (response.status === 503 || !data.configured) {
-                // OAuth not configured
-                showError('Google Sheets integration is not configured. Please contact the administrator to set up OAuth credentials.');
+            if (response.status === 400) {
+                // Credentials not saved
+                showError('Please save your OAuth credentials first.');
             } else {
                 throw new Error(data.error || 'Failed to initiate Google authorization');
             }

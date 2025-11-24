@@ -40,10 +40,31 @@
             <div class="api-key-container">
                 <h2>Google Sheets Integration (Optional)</h2>
                 
+                <!-- OAuth Credentials Input (shown first) -->
+                <div class="filter-group" id="oauthCredentialsGroup">
+                    <label for="googleClientIdInput">Google OAuth Client ID:</label>
+                    <input type="text" id="googleClientIdInput" class="filter-input" placeholder="your-client-id.apps.googleusercontent.com" style="width: 100%;">
+                    <small style="color: #666; margin-top: 5px; display: block;">Your Google OAuth Client ID. <a href="#" onclick="showOAuthHelp(); return false;">How to get this?</a></small>
+                </div>
+                
+                <div class="filter-group" id="oauthSecretGroup">
+                    <label for="googleClientSecretInput">Google OAuth Client Secret:</label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="password" id="googleClientSecretInput" class="filter-input" placeholder="Your Client Secret" style="flex: 1;">
+                        <button type="button" id="toggleOAuthSecretBtn" class="btn" style="padding: 8px 15px; background-color: #6c757d; color: white;">Show</button>
+                    </div>
+                    <small style="color: #666; margin-top: 5px; display: block;">Your Google OAuth Client Secret.</small>
+                </div>
+                
+                <div class="filter-group" id="saveOAuthCredentialsGroup">
+                    <button id="saveOAuthCredentialsBtn" class="btn btn-primary">Save OAuth Credentials</button>
+                    <small style="color: #666; margin-top: 5px; display: block;">Save your OAuth credentials to enable Google Sheets integration. You only need to do this once.</small>
+                </div>
+                
                 <!-- Google Authorization Status -->
-                <div class="filter-group" id="googleAuthStatus" style="margin-bottom: 15px;">
+                <div class="filter-group" id="googleAuthStatus" style="margin-bottom: 15px; display: none;">
                     <div id="googleNotConnected" style="display: none;">
-                        <p style="color: #666; margin-bottom: 10px;">Connect your Google account to automatically populate your sheets.</p>
+                        <p style="color: #666; margin-bottom: 10px;">OAuth credentials saved. Connect your Google account to automatically populate your sheets.</p>
                         <button id="connectGoogleBtn" class="btn btn-primary">Connect Google Sheets</button>
                     </div>
                     <div id="googleConnected" style="display: none;">
@@ -62,6 +83,30 @@
                 <div class="filter-group" id="populateGroup" style="display: none;">
                     <button id="populateSheetsBtn" class="btn btn-primary">Populate Sheets with HeyReach Data</button>
                     <small style="color: #666; margin-top: 5px; display: block;">This will populate the selected date range data into the Google Sheet, matching senders by name.</small>
+                </div>
+                
+                <!-- OAuth Help Modal (hidden by default) -->
+                <div id="oauthHelpModal" style="display: none; margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6;">
+                    <h3 style="margin-top: 0;">How to Get Google OAuth Credentials</h3>
+                    <ol style="line-height: 1.8;">
+                        <li>Go to <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a></li>
+                        <li>Create a new project (or select existing)</li>
+                        <li>Go to <strong>"APIs & Services"</strong> > <strong>"OAuth consent screen"</strong>
+                            <ul>
+                                <li>Choose "External"</li>
+                                <li>Fill in app name and your email</li>
+                                <li>Add scope: <code>https://www.googleapis.com/auth/spreadsheets</code></li>
+                                <li>Save</li>
+                            </ul>
+                        </li>
+                        <li>Go to <strong>"APIs & Services"</strong> > <strong>"Credentials"</strong></li>
+                        <li>Click <strong>"+ CREATE CREDENTIALS"</strong> > <strong>"OAuth client ID"</strong></li>
+                        <li>Choose <strong>"Web application"</strong></li>
+                        <li>Add <strong>Authorized redirect URI</strong>: <code id="redirectUriDisplay"></code></li>
+                        <li>Click <strong>"Create"</strong></li>
+                        <li>Copy the <strong>Client ID</strong> and <strong>Client Secret</strong></li>
+                    </ol>
+                    <button onclick="hideOAuthHelp(); return false;" class="btn" style="background-color: #6c757d; color: white; margin-top: 10px;">Close</button>
                 </div>
             </div>
         </div>

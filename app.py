@@ -644,22 +644,50 @@ def get_summary():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/google/save-credentials', methods=['POST'])
+def save_oauth_credentials():
+    """Save user's OAuth credentials to session"""
+    try:
+        data = request.get_json()
+        client_id = data.get('client_id', '').strip()
+        client_secret = data.get('client_secret', '').strip()
+        
+        if not client_id or not client_secret:
+            return jsonify({'error': 'Client ID and Client Secret are required'}), 400
+        
+        # Store in session
+        session['google_oauth_client_id'] = client_id
+        session['google_oauth_client_secret'] = client_secret
+        
+        logger.info("OAuth credentials saved to session")
+        return jsonify({
+            'success': True,
+            'message': 'OAuth credentials saved. You can now connect your Google account.'
+        })
+    except Exception as e:
+        logger.error(f"Error saving OAuth credentials: {e}")
+        return jsonify({'error': f'Failed to save credentials: {str(e)}'}), 500
+
+
 @app.route('/api/google/authorize', methods=['GET'])
 def google_authorize():
-    """Initiate Google OAuth authorization"""
+    """Initiate Google OAuth authorization using user's credentials"""
     try:
-        # Check if OAuth is configured
-        if not is_configured():
+        # Get user's credentials from session
+        client_id = session.get('google_oauth_client_id')
+        client_secret = session.get('google_oauth_client_secret')
+        
+        if not client_id or not client_secret:
             return jsonify({
-                'error': 'Google Sheets integration is not configured',
+                'error': 'OAuth credentials not found',
                 'configured': False,
-                'message': 'OAuth credentials are not set up. Please contact the administrator to configure Google Sheets integration.'
-            }), 503  # Service Unavailable
+                'message': 'Please save your Google OAuth credentials first.'
+            }), 400
         
         # Get redirect URI from request or use default
         redirect_uri = request.args.get('redirect_uri') or request.url_root.rstrip('/') + '/api/google/callback'
         
-        authorization_url = get_authorization_url(redirect_uri)
+        authorization_url = get_authorization_url(client_id, client_secret, redirect_uri)
         return jsonify({'authorization_url': authorization_url})
     except Exception as e:
         logger.error(f"Error initiating OAuth: {e}")
@@ -691,21 +719,28 @@ def google_callback():
 @app.route('/api/google/status', methods=['GET'])
 def google_status():
     """Check Google Sheets authorization status"""
-    configured = is_configured()
-    authorized = is_authorized() if configured else False
+    # Check if user has provided OAuth credentials
+    has_credentials = bool(session.get('google_oauth_client_id'))
+    authorized = is_authorized()
     
-    if not configured:
+    # Get redirect URI for help
+    redirect_uri = request.url_root.rstrip('/') + '/api/google/callback'
+    
+    if not has_credentials:
         return jsonify({
             'authorized': False,
             'configured': False,
-            'message': 'Google Sheets integration not configured. Please contact the administrator.',
-            'error': 'OAuth credentials not set up'
+            'has_credentials': False,
+            'redirect_uri': redirect_uri,
+            'message': 'Please provide your Google OAuth credentials first.'
         })
     
     return jsonify({
         'authorized': authorized,
         'configured': True,
-        'message': 'Google Sheets connected' if authorized else 'Not connected'
+        'has_credentials': True,
+        'redirect_uri': redirect_uri,
+        'message': 'Google Sheets connected' if authorized else 'OAuth credentials saved. Connect your Google account.'
     })
 
 
@@ -714,6 +749,9 @@ def google_revoke():
     """Revoke Google Sheets authorization"""
     try:
         revoke_authorization()
+        # Optionally clear OAuth credentials too
+        # session.pop('google_oauth_client_id', None)
+        # session.pop('google_oauth_client_secret', None)
         return jsonify({'success': True, 'message': 'Google Sheets authorization revoked'})
     except Exception as e:
         logger.error(f"Error revoking authorization: {e}")

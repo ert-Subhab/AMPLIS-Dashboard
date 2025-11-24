@@ -15,59 +15,60 @@ logger = logging.getLogger(__name__)
 # OAuth 2.0 scopes required for Google Sheets
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
-# OAuth 2.0 configuration
-# These should be set as environment variables or in config
-CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
-CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
-REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI', 'http://localhost:5000/api/google/callback')
+# Default redirect URI (can be overridden)
+DEFAULT_REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI', 'http://localhost:5000/api/google/callback')
 
 
-def get_oauth_flow(redirect_uri: str = None):
+def get_oauth_flow(client_id: str, client_secret: str, redirect_uri: str = None):
     """
-    Create OAuth 2.0 flow
+    Create OAuth 2.0 flow using user-provided credentials
     
     Args:
-        redirect_uri: OAuth redirect URI (defaults to environment variable)
+        client_id: User's Google OAuth Client ID
+        client_secret: User's Google OAuth Client Secret
+        redirect_uri: OAuth redirect URI
     
     Returns:
         Flow object
     """
-    if not CLIENT_ID or not CLIENT_SECRET:
+    if not client_id or not client_secret:
         raise ValueError(
-            "Google OAuth credentials not configured. "
-            "Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables."
+            "Google OAuth credentials are required. "
+            "Please provide your Google OAuth Client ID and Client Secret."
         )
     
     flow = Flow.from_client_config(
         {
             "web": {
-                "client_id": CLIENT_ID,
-                "client_secret": CLIENT_SECRET,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [redirect_uri or REDIRECT_URI]
+                "redirect_uris": [redirect_uri or DEFAULT_REDIRECT_URI]
             }
         },
         scopes=SCOPES,
-        redirect_uri=redirect_uri or REDIRECT_URI
+        redirect_uri=redirect_uri or DEFAULT_REDIRECT_URI
     )
     
     return flow
 
 
-def get_authorization_url(redirect_uri: str = None):
+def get_authorization_url(client_id: str, client_secret: str, redirect_uri: str = None):
     """
-    Get Google OAuth authorization URL
+    Get Google OAuth authorization URL using user's credentials
     
     Args:
+        client_id: User's Google OAuth Client ID
+        client_secret: User's Google OAuth Client Secret
         redirect_uri: OAuth redirect URI
     
     Returns:
         Authorization URL string
     """
-    flow = get_oauth_flow(redirect_uri)
+    flow = get_oauth_flow(client_id, client_secret, redirect_uri)
     
-    # Store flow in session for callback
+    # Store credentials and flow state in session for callback
     authorization_url, state = flow.authorization_url(
         access_type='offline',
         include_granted_scopes='true',
@@ -75,14 +76,16 @@ def get_authorization_url(redirect_uri: str = None):
     )
     
     session['oauth_state'] = state
-    session['oauth_redirect_uri'] = redirect_uri or REDIRECT_URI
+    session['oauth_redirect_uri'] = redirect_uri or DEFAULT_REDIRECT_URI
+    session['oauth_client_id'] = client_id
+    session['oauth_client_secret'] = client_secret
     
     return authorization_url
 
 
 def handle_oauth_callback(code: str, state: str):
     """
-    Handle OAuth callback and exchange code for tokens
+    Handle OAuth callback and exchange code for tokens using user's credentials
     
     Args:
         code: Authorization code from Google
@@ -95,26 +98,33 @@ def handle_oauth_callback(code: str, state: str):
     if state != session.get('oauth_state'):
         raise ValueError("Invalid OAuth state parameter")
     
-    redirect_uri = session.get('oauth_redirect_uri', REDIRECT_URI)
-    flow = get_oauth_flow(redirect_uri)
+    # Get user's credentials from session
+    client_id = session.get('oauth_client_id')
+    client_secret = session.get('oauth_client_secret')
+    
+    if not client_id or not client_secret:
+        raise ValueError("OAuth credentials not found in session. Please start the authorization process again.")
+    
+    redirect_uri = session.get('oauth_redirect_uri', DEFAULT_REDIRECT_URI)
+    flow = get_oauth_flow(client_id, client_secret, redirect_uri)
     flow.fetch_token(code=code)
     
     # Get credentials
     creds = flow.credentials
     
-    # Store token info in session
+    # Store token info in session (with user's client credentials)
     token_info = {
         'token': creds.token,
         'refresh_token': creds.refresh_token,
         'token_uri': creds.token_uri,
-        'client_id': CLIENT_ID,
-        'client_secret': CLIENT_SECRET,
+        'client_id': client_id,
+        'client_secret': client_secret,
         'scopes': creds.scopes or SCOPES
     }
     
     session['google_oauth_token'] = token_info
     
-    # Clear OAuth state
+    # Clear OAuth state (but keep credentials for future use)
     session.pop('oauth_state', None)
     session.pop('oauth_redirect_uri', None)
     
@@ -157,8 +167,9 @@ def get_stored_credentials():
 
 
 def is_configured():
-    """Check if OAuth credentials are configured"""
-    return bool(CLIENT_ID and CLIENT_SECRET)
+    """Check if user has provided OAuth credentials in session"""
+    # Check if user has provided their own credentials
+    return bool(session.get('google_oauth_client_id') or session.get('google_oauth_token'))
 
 
 def is_authorized():
