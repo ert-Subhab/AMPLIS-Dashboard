@@ -205,16 +205,27 @@ function updateSummary(data) {
     let totalOpenConversations = 0;
     let totalInterested = 0;
     
+    // Use a Set to track which sender+week combinations we've already counted
+    // This prevents double-counting when senders appear in both data.senders and data.clients
+    const countedWeeks = new Set();
+    
     // Aggregate data from all senders
     for (const senderName in data.senders) {
         const weeks = data.senders[senderName];
         weeks.forEach(week => {
-            totalConnectionsSent += week.connections_sent || 0;
-            totalConnectionsAccepted += week.connections_accepted || 0;
-            totalMessagesSent += week.messages_sent || 0;
-            totalMessageReplies += week.message_replies || 0;
-            totalOpenConversations += week.open_conversations || 0;
-            totalInterested += week.interested || 0;
+            // Create a unique key for this sender+week combination
+            const weekKey = `${senderName}_${week.week_start}`;
+            
+            // Only count if we haven't counted this sender+week combination before
+            if (!countedWeeks.has(weekKey)) {
+                countedWeeks.add(weekKey);
+                totalConnectionsSent += week.connections_sent || 0;
+                totalConnectionsAccepted += week.connections_accepted || 0;
+                totalMessagesSent += week.messages_sent || 0;
+                totalMessageReplies += week.message_replies || 0;
+                totalOpenConversations += week.open_conversations || 0;
+                totalInterested += week.interested || 0;
+            }
         });
     }
     
