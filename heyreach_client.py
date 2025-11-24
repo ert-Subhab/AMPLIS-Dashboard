@@ -50,11 +50,13 @@ class HeyReachClient:
         from urllib3.util.retry import Retry
         
         # Retry strategy for transient errors
+        # For 429 (rate limit), use longer backoff; for other errors, use shorter backoff
         retry_strategy = Retry(
-            total=3,
-            backoff_factor=0.3,
+            total=5,  # Increased retries
+            backoff_factor=2.0,  # Increased backoff: 2s, 4s, 8s, 16s, 32s
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET", "POST"]
+            allowed_methods=["GET", "POST"],
+            respect_retry_after_header=True  # Respect Retry-After header from API
         )
         
         adapter = HTTPAdapter(
@@ -1210,7 +1212,7 @@ class HeyReachClient:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
         def fetch_sender_week_stats(account, week):
-            """Fetch stats for a single sender-week combination"""
+            """Fetch stats for a single sender-week combination with retry logic"""
             account_id = account.get('id')
             account_id_int = int(account_id) if account_id and isinstance(account_id, (str, float)) else account_id
             
@@ -1226,20 +1228,49 @@ class HeyReachClient:
             week_end_iso = week['end'].strftime('%Y-%m-%dT23:59:59.999Z')
             
             api_account_id = account_id_int if account_id_int else account_id
-            stats = self.get_overall_stats(
-                account_ids=[api_account_id],
-                campaign_ids=[],
-                start_date=week_start_iso,
-                end_date=week_end_iso
-            )
             
+            # Retry logic for rate limits
+            max_retries = 3
+            retry_delay = 2.0  # Start with 2 seconds
+            
+            for attempt in range(max_retries):
+                try:
+                    stats = self.get_overall_stats(
+                        account_ids=[api_account_id],
+                        campaign_ids=[],
+                        start_date=week_start_iso,
+                        end_date=week_end_iso
+                    )
+                    
+                    return {
+                        'account': account,
+                        'account_id': account_id,
+                        'account_id_int': account_id_int,
+                        'sender_name': sender_name,
+                        'week': week,
+                        'stats': stats
+                    }
+                except Exception as e:
+                    error_str = str(e)
+                    if ('429' in error_str or 'rate limit' in error_str.lower() or 'too many' in error_str.lower()) and attempt < max_retries - 1:
+                        # Exponential backoff for rate limits
+                        wait_time = retry_delay * (2 ** attempt)
+                        logger.debug(f"Rate limit hit for {sender_name} week {week['key']}, waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        # Re-raise if not a rate limit or if we've exhausted retries
+                        raise
+            
+            # If all retries failed, return empty stats
+            logger.warning(f"Failed to fetch stats for {sender_name} week {week['key']} after {max_retries} retries")
             return {
                 'account': account,
                 'account_id': account_id,
                 'account_id_int': account_id_int,
                 'sender_name': sender_name,
                 'week': week,
-                'stats': stats
+                'stats': {}
             }
         
         # Create list of all sender-week combinations for parallel processing
@@ -1252,8 +1283,8 @@ class HeyReachClient:
         
         # Process tasks in parallel with ThreadPoolExecutor
         # Use max_workers to limit concurrent API calls (avoid overwhelming the API)
-        # Increased to 20 to reduce total processing time and avoid timeouts
-        max_workers = min(20, len(tasks))  # Max 20 concurrent requests
+        # Reduced to 10 to avoid rate limiting, with delays between batches
+        max_workers = min(10, len(tasks))  # Max 10 concurrent requests to avoid rate limits
         
         first_result_logged = False
         
@@ -1281,15 +1312,33 @@ class HeyReachClient:
                                 return default
             return default
         
+        # Add rate limiting: process in batches with delays
+        import time
+        batch_size = max_workers * 3  # Process 3x workers at a time
+        batch_delay = 0.5  # 0.5 second delay between batches
+        
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all tasks
+            # Submit all tasks, but process in batches with delays
             future_to_task = {executor.submit(fetch_sender_week_stats, account, week): (account, week) 
                              for account, week in tasks}
             
             # Process completed tasks
             completed = 0
+            rate_limit_errors = 0
+            last_batch_time = time.time()
+            
             for future in as_completed(future_to_task):
                 completed += 1
+                
+                # Add delay between batches to avoid rate limits
+                if completed % batch_size == 0:
+                    elapsed = time.time() - last_batch_time
+                    if elapsed < batch_delay:
+                        sleep_time = batch_delay - elapsed
+                        logger.debug(f"Batch of {batch_size} complete, waiting {sleep_time:.2f}s to avoid rate limits...")
+                        time.sleep(sleep_time)
+                    last_batch_time = time.time()
+                
                 try:
                     result = future.result()
                     account = result['account']
@@ -1298,6 +1347,10 @@ class HeyReachClient:
                     sender_name = result['sender_name']
                     week = result['week']
                     stats = result['stats']
+                    
+                    # Reset rate limit error counter on success
+                    if rate_limit_errors > 0:
+                        rate_limit_errors = max(0, rate_limit_errors - 1)
                     
                     # Log progress
                     if completed % 10 == 0 or completed == len(tasks):
@@ -1395,9 +1448,22 @@ class HeyReachClient:
                         
                 except Exception as e:
                     account, week = future_to_task[future]
-                    logger.error(f"Error processing {account.get('id')} week {week['key']}: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
+                    error_str = str(e)
+                    
+                    # Check if it's a rate limit error
+                    if '429' in error_str or 'rate limit' in error_str.lower() or 'too many' in error_str.lower():
+                        rate_limit_errors += 1
+                        logger.warning(f"Rate limit error ({rate_limit_errors}) for {account.get('id')} week {week['key']}: {e}")
+                        
+                        # If we're getting too many rate limit errors, increase delay
+                        if rate_limit_errors >= 5:
+                            batch_delay = min(batch_delay * 2, 5.0)  # Max 5 seconds
+                            logger.warning(f"Increasing batch delay to {batch_delay}s due to rate limits")
+                            rate_limit_errors = 0  # Reset counter
+                    else:
+                        logger.error(f"Error processing {account.get('id')} week {week['key']}: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
         
         logger.info(f"Completed processing all {len(tasks)} sender-week combinations")
         
