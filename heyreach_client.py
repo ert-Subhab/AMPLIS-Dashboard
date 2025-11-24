@@ -1207,8 +1207,11 @@ class HeyReachClient:
                 
                 # Get stats for this sender and week
                 # get_overall_stats will handle account ID conversion to integer
+                # Ensure account_id is the integer version for API call
+                api_account_id = account_id_int if account_id_int else account_id
+                logger.debug(f"  Making API call with accountIds=[{api_account_id}] for sender {sender_name} (original ID: {account_id})")
                 stats = self.get_overall_stats(
-                    account_ids=[account_id],
+                    account_ids=[api_account_id],
                     campaign_ids=[],
                     start_date=week_start_iso,
                     end_date=week_end_iso
@@ -1341,16 +1344,15 @@ class HeyReachClient:
                         'notEnrolled', 'pending', 'pendingLeadsCount'
                     )
                     
-                    # Log extracted values for debugging
-                    if account_idx == 0 and week_idx == 0:
-                        logger.info(f"📊 Extracted metrics for {sender_name} (week {week['key']}):")
-                        logger.info(f"   Connections Sent: {week_data['connections_sent']}")
-                        logger.info(f"   Connections Accepted: {week_data['connections_accepted']}")
-                        logger.info(f"   Messages Sent: {week_data['messages_sent']}")
-                        logger.info(f"   Message Replies: {week_data['message_replies']}")
-                        logger.info(f"   Open Conversations: {week_data['open_conversations']}")
-                        logger.info(f"   Interested: {week_data['interested']}")
-                        logger.info(f"   Leads Not Enrolled: {week_data['leads_not_enrolled']}")
+                    # Log extracted values for debugging (log for all senders, not just first)
+                    logger.info(f"📊 Extracted metrics for {sender_name} (ID: {account_id}, week {week['key']}):")
+                    logger.info(f"   Connections Sent: {week_data['connections_sent']}")
+                    logger.info(f"   Connections Accepted: {week_data['connections_accepted']}")
+                    logger.info(f"   Messages Sent: {week_data['messages_sent']}")
+                    logger.info(f"   Message Replies: {week_data['message_replies']}")
+                    logger.info(f"   Open Conversations: {week_data['open_conversations']}")
+                    logger.info(f"   Interested: {week_data['interested']}")
+                    logger.info(f"   Leads Not Enrolled: {week_data['leads_not_enrolled']}")
                     
                     logger.debug(f"    Week {week['key']} Stats for {sender_name}: {week_data}")
         
