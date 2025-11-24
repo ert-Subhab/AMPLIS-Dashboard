@@ -1123,6 +1123,7 @@ async function populateSheets() {
                 .join(', ');
             message += ` (${worksheetDetails})`;
         }
+        showMessage(message, 'success');
         
         if (data.errors && data.errors.length > 0) {
             message += `. ${data.errors.length} error(s) occurred. Check console for details.`;
