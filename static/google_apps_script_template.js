@@ -38,6 +38,7 @@ function doPost(e) {
       const weeks = sender.weeks || [];
       
       if (weeks.length === 0) {
+        results.errors.push(`Sender "${senderName}" has no week data to process`);
         return; // Skip senders with no data
       }
       
@@ -48,30 +49,36 @@ function doPost(e) {
         const sheet = allSheets[sheetIdx];
         const sheetName = sheet.getName();
         
-        // Find sender in this sheet
-        const senderInfo = findSenderInSheet(sheet, senderName, senderId, data.sender_id_mapping);
-        
-        if (senderInfo) {
-          senderFound = true;
+        try {
+          // Find sender in this sheet
+          const senderInfo = findSenderInSheet(sheet, senderName, senderId, data.sender_id_mapping);
           
-          try {
-            // Populate data for this sender
-            const updateResult = populateSenderData(sheet, senderInfo, weeks, data.date_range);
+          if (senderInfo) {
+            senderFound = true;
             
-            results.processed_sheets.push({
-              sheet: sheetName,
-              sender: senderName,
-              weeks_updated: updateResult.weeks_updated,
-              cells_updated: updateResult.cells_updated
-            });
-          } catch (error) {
-            results.errors.push(`Error processing ${senderName} in ${sheetName}: ${error.toString()}`);
+            try {
+              // Populate data for this sender
+              const updateResult = populateSenderData(sheet, senderInfo, weeks, data.date_range);
+              
+              results.processed_sheets.push({
+                sheet: sheetName,
+                sender: senderName,
+                sender_id: senderId,
+                found_by: senderInfo.found_by,
+                weeks_updated: updateResult.weeks_updated,
+                cells_updated: updateResult.cells_updated
+              });
+            } catch (error) {
+              results.errors.push(`Error populating data for ${senderName} (ID: ${senderId}) in sheet "${sheetName}": ${error.toString()}`);
+            }
           }
+        } catch (error) {
+          results.errors.push(`Error searching for ${senderName} in sheet "${sheetName}": ${error.toString()}`);
         }
       }
       
       if (!senderFound) {
-        results.errors.push(`Sender "${senderName}" not found in any sheet`);
+        results.errors.push(`Sender "${senderName}" (ID: ${senderId}) not found in any sheet. Make sure the sender name matches exactly (case-insensitive) in column A of one of the sheets.`);
       }
     });
     
@@ -102,7 +109,10 @@ function findSenderInSheet(sheet, senderName, senderId, senderIdMapping) {
     return null;
   }
   
-  // Search for sender name in column A (row 2 and below)
+  // Normalize the incoming sender name for comparison
+  const normalizedSenderName = senderName.toLowerCase().trim();
+  
+  // Search for sender name in column A (row 2 and below, since row 1 is header)
   for (let rowIdx = 1; rowIdx < allValues.length; rowIdx++) {
     const row = allValues[rowIdx];
     const firstCell = row[0] ? String(row[0]).trim() : '';
@@ -111,8 +121,10 @@ function findSenderInSheet(sheet, senderName, senderId, senderIdMapping) {
     
     // Check if it's a sender name (not a metric, not a date, not empty)
     if (isSenderName(firstCell, allValues, rowIdx)) {
-      // Try exact match first
-      if (firstCell.toLowerCase() === senderName.toLowerCase()) {
+      const normalizedCellValue = firstCell.toLowerCase().trim();
+      
+      // Try exact match first (case-insensitive)
+      if (normalizedCellValue === normalizedSenderName) {
         return {
           row: rowIdx + 1, // 1-indexed
           name: firstCell,
@@ -120,9 +132,9 @@ function findSenderInSheet(sheet, senderName, senderId, senderIdMapping) {
         };
       }
       
-      // Try partial match
-      if (firstCell.toLowerCase().includes(senderName.toLowerCase()) || 
-          senderName.toLowerCase().includes(firstCell.toLowerCase())) {
+      // Try partial match (either direction)
+      if (normalizedCellValue.includes(normalizedSenderName) || 
+          normalizedSenderName.includes(normalizedCellValue)) {
         return {
           row: rowIdx + 1,
           name: firstCell,
@@ -133,15 +145,22 @@ function findSenderInSheet(sheet, senderName, senderId, senderIdMapping) {
       // Try matching by sender ID if we have it
       if (senderId && senderIdMapping) {
         // Check if this name corresponds to the sender ID
+        // senderIdMapping maps: { "Sender Name": senderId }
         for (const [mappedName, mappedId] of Object.entries(senderIdMapping)) {
-          if (mappedId === senderId && 
-              (firstCell.toLowerCase() === mappedName.toLowerCase() ||
-               firstCell.toLowerCase().includes(mappedName.toLowerCase()))) {
-            return {
-              row: rowIdx + 1,
-              name: firstCell,
-              found_by: 'id_mapping'
-            };
+          const normalizedMappedName = mappedName.toLowerCase().trim();
+          
+          // Check if the mapped ID matches our sender ID
+          if (mappedId == senderId) { // Use == for type coercion (string vs number)
+            // Check if the cell value matches the mapped name
+            if (normalizedCellValue === normalizedMappedName ||
+                normalizedCellValue.includes(normalizedMappedName) ||
+                normalizedMappedName.includes(normalizedCellValue)) {
+              return {
+                row: rowIdx + 1,
+                name: firstCell,
+                found_by: 'id_mapping'
+              };
+            }
           }
         }
       }
@@ -157,15 +176,13 @@ function findSenderInSheet(sheet, senderName, senderId, senderIdMapping) {
 function isSenderName(cellValue, allValues, rowIdx) {
   const value = String(cellValue).toLowerCase().trim();
   
-  // Skip if it's a metric name
-  const metricNames = [
-    'connections sent', 'connections accepted', 'acceptance rate',
-    'messages sent', 'message replies', 'reply rate',
-    'open conversations', 'interested', 'leads not yet enrolled',
-    'leads not enrolled', 'notes'
-  ];
+  // Skip if it's empty or just whitespace
+  if (!value || value.length === 0) {
+    return false;
+  }
   
-  if (metricNames.some(metric => value.includes(metric))) {
+  // Skip if it's a year (4 digits)
+  if (/^\d{4}$/.test(value)) {
     return false;
   }
   
@@ -174,18 +191,51 @@ function isSenderName(cellValue, allValues, rowIdx) {
     return false;
   }
   
-  // Skip if it's a year
-  if (/^\d{4}$/.test(value)) {
-    return false;
+  // Skip if it's a metric name (exact or partial match)
+  const metricNames = [
+    'connections sent', 'connections accepted', 'acceptance rate',
+    'messages sent', 'message replies', 'reply rate',
+    'open conversations', 'interested', 'leads not yet enrolled',
+    'leads not enrolled', 'notes'
+  ];
+  
+  for (const metric of metricNames) {
+    if (value === metric || value.startsWith(metric) || metric.startsWith(value)) {
+      return false;
+    }
   }
   
-  // Skip if it's empty or just whitespace
-  if (!value || value.length === 0) {
-    return false;
+  // Check the next row to see if it contains a metric name
+  // This helps identify sender names (they're followed by metrics)
+  if (rowIdx + 1 < allValues.length) {
+    const nextRow = allValues[rowIdx + 1];
+    const nextCell = nextRow && nextRow[0] ? String(nextRow[0]).toLowerCase().trim() : '';
+    
+    // If the next row starts with a metric, this is likely a sender name
+    for (const metric of metricNames) {
+      if (nextCell === metric || nextCell.startsWith(metric)) {
+        return true; // This is likely a sender name
+      }
+    }
   }
   
   // If it has letters and is not a metric, it's likely a sender name
-  return /[a-zA-Z]/.test(value);
+  // But be more strict: sender names typically don't contain special characters like %, /, etc.
+  if (/[a-zA-Z]/.test(value) && !/[%\/]/.test(value)) {
+    // Additional check: if the row below is empty or contains metrics, this is likely a sender
+    if (rowIdx + 1 < allValues.length) {
+      const nextRow = allValues[rowIdx + 1];
+      const nextCell = nextRow && nextRow[0] ? String(nextRow[0]).toLowerCase().trim() : '';
+      if (!nextCell || nextCell === '' || metricNames.some(m => nextCell.includes(m))) {
+        return true;
+      }
+    } else {
+      // Last row, but has letters - could be a sender
+      return true;
+    }
+  }
+  
+  return false;
 }
 
 /**
@@ -202,11 +252,23 @@ function populateSenderData(sheet, senderInfo, weeks, dateRange) {
   // Get or create header row (row 1)
   let headerRow = allValues[0] || [];
   
-  // Ensure year is in column A
-  if (!headerRow[0] || String(headerRow[0]).trim() === '') {
-    const currentYear = new Date().getFullYear();
-    sheet.getRange(1, 1).setValue(currentYear);
-    headerRow[0] = currentYear;
+  // Ensure year is in column A (only if empty)
+  const yearCell = headerRow[0] ? String(headerRow[0]).trim() : '';
+  if (!yearCell || yearCell === '') {
+    // Try to get year from the first week's date, otherwise use current year
+    let year = new Date().getFullYear();
+    if (weeks.length > 0 && weeks[0].week_end) {
+      try {
+        const weekDate = new Date(weeks[0].week_end);
+        if (!isNaN(weekDate.getTime())) {
+          year = weekDate.getFullYear();
+        }
+      } catch (e) {
+        // Use current year if parsing fails
+      }
+    }
+    sheet.getRange(1, 1).setValue(year);
+    headerRow[0] = year;
   }
   
   // Find or create week columns
@@ -224,18 +286,21 @@ function populateSenderData(sheet, senderInfo, weeks, dateRange) {
     { name: 'Interested', key: 'interested', rowOffset: 8 }
   ];
   
-  // Ensure metric rows exist and are labeled
+  // Ensure metric rows exist and are labeled in the correct order
+  // Metrics should appear in fixed order right after the sender name (matching CSV format)
   const metricStartRow = senderRow + 1; // Row after sender name
   
   for (let i = 0; i < metrics.length; i++) {
     const metric = metrics[i];
     const metricRow = metricStartRow + i;
     
-    // Ensure metric name is in column A
+    // Get current value in column A for this row
     const currentMetricName = allValues[metricRow - 1] ? 
       (allValues[metricRow - 1][0] ? String(allValues[metricRow - 1][0]).trim() : '') : '';
     
-    if (currentMetricName.toLowerCase() !== metric.name.toLowerCase()) {
+    // Only set metric name if it's empty or doesn't match
+    // This preserves existing metric names if they're already correct
+    if (!currentMetricName || currentMetricName.toLowerCase() !== metric.name.toLowerCase()) {
       sheet.getRange(metricRow, 1).setValue(metric.name);
     }
     
@@ -246,18 +311,34 @@ function populateSenderData(sheet, senderInfo, weeks, dateRange) {
       
       if (!weekCol) continue;
       
-      // Get current value
-      const currentValue = allValues[metricRow - 1] ? 
-        (allValues[metricRow - 1][weekCol - 1] ? String(allValues[metricRow - 1][weekCol - 1]).trim() : '') : '';
+      // Get current value from the sheet (refresh to get latest)
+      const cellRange = sheet.getRange(metricRow, weekCol);
+      const cellValue = cellRange.getValue();
+      const currentValue = cellValue !== null && cellValue !== undefined ? String(cellValue).trim() : '';
       
-      // Only update if cell is empty
+      // Only update if cell is empty or contains only whitespace
+      // Note: We don't update if it's '0' because 0 is a valid value
       if (!currentValue || currentValue === '') {
-        let valueToWrite = week[metric.key] || 0;
+        let valueToWrite = week[metric.key];
+        
+        // Handle undefined/null values
+        if (valueToWrite === undefined || valueToWrite === null) {
+          valueToWrite = 0;
+        }
         
         if (metric.isPercentage) {
-          valueToWrite = valueToWrite + '%';
+          // Format percentage: if it's already a number, add %, otherwise use as-is
+          if (typeof valueToWrite === 'number') {
+            valueToWrite = valueToWrite.toFixed(2) + '%';
+          } else {
+            valueToWrite = String(valueToWrite);
+            if (!valueToWrite.endsWith('%')) {
+              valueToWrite = valueToWrite + '%';
+            }
+          }
         } else {
-          valueToWrite = valueToWrite;
+          // For non-percentage values, ensure it's a number
+          valueToWrite = Number(valueToWrite) || 0;
         }
         
         sheet.getRange(metricRow, weekCol).setValue(valueToWrite);
@@ -277,17 +358,27 @@ function findOrCreateWeekColumns(sheet, headerRow, weeks) {
   const weekColumns = {};
   let lastWeekCol = 1; // Start from column B (index 1, which is column 2)
   
-  // Find the last existing week column
+  // Find the last existing week column (M/D format)
   for (let colIdx = 1; colIdx < headerRow.length; colIdx++) {
     const cellValue = headerRow[colIdx] ? String(headerRow[colIdx]).trim() : '';
     if (/^\d{1,2}\/\d{1,2}$/.test(cellValue)) {
-      lastWeekCol = colIdx + 1; // 1-indexed column number
+      lastWeekCol = colIdx + 1; // 1-indexed column number (keep updating to find the LAST one)
     }
   }
   
-    // Process each week (use week_end which is Friday, not week_start)
-    for (const week of weeks) {
-      const weekKey = formatWeekDate(week.week_end || week.week_start);
+  // If no week columns found, start from column B
+  if (lastWeekCol === 1) {
+    lastWeekCol = 2; // Column B
+  } else {
+    // lastWeekCol already points to the last week column, so new columns start after it
+    // No need to increment here, we'll increment when creating new columns
+  }
+
+  // Process each week (use week_end which is Friday, not week_start)
+  for (const week of weeks) {
+    const weekKey = formatWeekDate(week.week_end || week.week_start);
+    
+    if (!weekKey) continue; // Skip if week key is invalid
     
     // Check if week column already exists
     let foundCol = null;
@@ -302,10 +393,18 @@ function findOrCreateWeekColumns(sheet, headerRow, weeks) {
     if (foundCol) {
       weekColumns[weekKey] = foundCol;
     } else {
-      // Create new week column
+      // Create new week column after the last existing week column
       lastWeekCol++;
       sheet.getRange(1, lastWeekCol).setValue(weekKey);
       weekColumns[weekKey] = lastWeekCol;
+      // Update headerRow array for next iteration
+      if (headerRow.length < lastWeekCol) {
+        // Extend array if needed
+        while (headerRow.length < lastWeekCol) {
+          headerRow.push('');
+        }
+      }
+      headerRow[lastWeekCol - 1] = weekKey; // Update in-memory array (0-indexed)
     }
   }
   
