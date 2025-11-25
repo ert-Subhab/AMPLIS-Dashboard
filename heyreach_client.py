@@ -1173,16 +1173,17 @@ class HeyReachClient:
         max_weeks = 52
         
         while current_week_start <= end_date_obj and week_count < max_weeks:
-            week_end = current_week_start + timedelta(days=6)  # Friday
+            week_end_friday = current_week_start + timedelta(days=6)  # Always Friday
             
-            if week_end >= start_date_obj:
+            if week_end_friday >= start_date_obj:
                 effective_start = max(current_week_start, start_date_obj)
-                effective_end = min(week_end, end_date_obj)
+                effective_end = min(week_end_friday, end_date_obj)
                 
                 weeks.append({
-                    'start': effective_start,
-                    'end': effective_end,
-                    'key': week_end.strftime('%Y-%m-%d')  # Friday as week identifier
+                    'start': effective_start,           # Actual data start (may be capped)
+                    'end': effective_end,               # Actual data end (may be capped)
+                    'friday': week_end_friday,          # Always the Friday of this week
+                    'key': week_end_friday.strftime('%Y-%m-%d')  # Friday as week identifier
                 })
             
             current_week_start = current_week_start + timedelta(days=7)
@@ -1337,18 +1338,25 @@ class HeyReachClient:
                 acceptance_rate = (connections_accepted / connections_sent * 100) if connections_sent > 0 else 0
                 reply_rate = (message_replies / messages_sent * 100) if messages_sent > 0 else 0
                 
-                # Get actual week start and end dates from week_objects_dict if available
-                week_start_str = week_key  # Default to week_key (which is Friday)
-                week_end_str = week_key    # Default to week_key
+                # week_key is ALWAYS the Friday date (end of Sat-Fri week)
+                # Use this for display regardless of user's date range
+                week_end_str = week_key  # Friday - ALWAYS use this for display
+                week_start_str = week_key  # Default
                 
                 if week_objects_dict and week_key in week_objects_dict:
                     week_obj = week_objects_dict[week_key]
-                    week_start_str = week_obj['start'].strftime('%Y-%m-%d')
-                    week_end_str = week_obj['end'].strftime('%Y-%m-%d')
+                    # Use the actual Saturday start for week_start
+                    # But ALWAYS use the Friday for week_end (for display)
+                    if 'friday' in week_obj:
+                        week_start_str = (week_obj['friday'] - timedelta(days=6)).strftime('%Y-%m-%d')
+                        week_end_str = week_obj['friday'].strftime('%Y-%m-%d')
+                    else:
+                        week_start_str = week_obj['start'].strftime('%Y-%m-%d')
+                        week_end_str = week_key  # Fallback to key which is Friday
                 
                 formatted_weeks.append({
-                    'week_start': week_start_str,  # Saturday (start of week)
-                    'week_end': week_end_str,      # Friday (end of week) - this is what we display
+                    'week_start': week_start_str,  # Saturday (start of Sat-Fri week)
+                    'week_end': week_end_str,      # Friday (end of Sat-Fri week) - ALWAYS the Friday
                     'connections_sent': int(connections_sent),
                     'connections_accepted': int(connections_accepted),
                     'acceptance_rate': round(acceptance_rate, 2),
