@@ -1314,9 +1314,9 @@ class HeyReachClient:
         logger.info(f"Processing {len(tasks)} sender-week combinations in parallel...")
         
         # Process tasks in parallel with ThreadPoolExecutor
-        # Use max_workers to limit concurrent API calls (avoid overwhelming the API)
-        # Reduced to 10 to avoid rate limiting, with delays between batches
-        max_workers = min(10, len(tasks))  # Max 10 concurrent requests to avoid rate limits
+        # Increased workers and reduced delays to complete faster and avoid Render platform timeout
+        # Render has a 30-60s platform-level timeout that overrides Gunicorn settings
+        max_workers = min(25, len(tasks))  # Increased to 25 to process faster
         
         first_result_logged = False
         
@@ -1344,10 +1344,10 @@ class HeyReachClient:
                                 return default
             return default
         
-        # Add rate limiting: process in batches with delays
+        # Minimal delays to process faster - rely on retry strategy for rate limits
         import time
-        batch_size = max_workers * 3  # Process 3x workers at a time
-        batch_delay = 0.5  # 0.5 second delay between batches
+        batch_size = max_workers * 2  # Process 2x workers at a time
+        batch_delay = 0.1  # Minimal delay - retry strategy handles rate limits
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks, but process in batches with delays
@@ -1487,9 +1487,9 @@ class HeyReachClient:
                         rate_limit_errors += 1
                         logger.warning(f"Rate limit error ({rate_limit_errors}) for {account.get('id')} week {week['key']}: {e}")
                         
-                        # If we're getting too many rate limit errors, increase delay
+                        # If we're getting too many rate limit errors, increase delay slightly
                         if rate_limit_errors >= 5:
-                            batch_delay = min(batch_delay * 2, 5.0)  # Max 5 seconds
+                            batch_delay = min(batch_delay * 1.5, 1.0)  # Max 1 second to avoid timeout
                             logger.warning(f"Increasing batch delay to {batch_delay}s due to rate limits")
                             rate_limit_errors = 0  # Reset counter
                     else:

@@ -264,7 +264,7 @@ function updateSummary(data) {
         const weeks = data.senders[senderName];
         weeks.forEach(week => {
             // Create a unique key for this sender+week combination
-            const weekKey = `${senderName}_${week.week_start}`;
+            const weekKey = `${senderName}_${week.week_end}`;
             
             // Only count if we haven't counted this sender+week combination before
             if (!countedWeeks.has(weekKey)) {
@@ -343,7 +343,7 @@ function updatePerformanceTables(data) {
         const tbody = document.createElement('tbody');
         weeks.forEach(week => {
             const row = document.createElement('tr');
-            const weekDate = new Date(week.week_start);
+            const weekDate = new Date(week.week_end);
             const weekLabel = formatWeekLabel(weekDate);
             
             const acceptanceRateClass = getRateClass(week.acceptance_rate, 30, 20);
@@ -439,7 +439,7 @@ function updateChart(data) {
     // Collect all unique weeks
     for (const senderName in data.senders) {
         data.senders[senderName].forEach(week => {
-            allWeeks.add(week.week_start);
+            allWeeks.add(week.week_end);
         });
     }
     
@@ -456,7 +456,7 @@ function updateChart(data) {
     let colorIndex = 0;
     for (const senderName in data.senders) {
         const weeks = data.senders[senderName];
-        const weekMap = new Map(weeks.map(w => [w.week_start, w]));
+        const weekMap = new Map(weeks.map(w => [w.week_end, w]));
         
         const connectionsData = sortedWeeks.map(week => {
             const weekData = weekMap.get(week);
