@@ -8,10 +8,12 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import logging
 import json
+import gc
+import time
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-# Reduce verbosity for requests library
+# Reduce verbosity for requests library to minimize memory from log strings
 logging.getLogger('requests').setLevel(logging.WARNING)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 
@@ -1062,6 +1064,11 @@ class HeyReachClient:
         """
         Get weekly performance data for a specific sender or all senders using GetOverallStats API
         
+        MEMORY-OPTIMIZED for Render free plan (512MB RAM limit):
+        - Uses sequential batch processing instead of parallel ThreadPoolExecutor
+        - Processes results immediately and clears raw data
+        - Explicit garbage collection between batches
+        
         Args:
             sender_id: Optional sender (LinkedIn account) ID. If None, gets all senders
             start_date: Start date (YYYY-MM-DD). If None, defaults to last 7 days
@@ -1070,29 +1077,25 @@ class HeyReachClient:
         Returns:
             Dictionary with weekly performance data grouped by sender
         """
-        from collections import defaultdict
-        from datetime import datetime, timedelta
         
-        # Default to last 7 days if dates not provided (changed from 12 weeks)
+        # Default to last 7 days if dates not provided
         if not end_date:
             end_date_obj = datetime.now()
         else:
             end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
         
         if not start_date:
-            start_date_obj = end_date_obj - timedelta(days=7)  # Changed from weeks=12
+            start_date_obj = end_date_obj - timedelta(days=7)
         else:
             start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
         
         # ALWAYS prioritize manually configured sender IDs if available
-        # This ensures we use the sender IDs from config.yaml or environment variables
         linkedin_accounts = []
         
         # Use manually configured sender IDs if available (priority)
         if self.manual_sender_ids and len(self.manual_sender_ids) > 0:
             logger.info(f"Using {len(self.manual_sender_ids)} manually configured sender IDs")
             for sender_id_val in self.manual_sender_ids:
-                # Try both int and original format for lookup
                 sender_id_int = int(sender_id_val) if isinstance(sender_id_val, (str, float)) else sender_id_val
                 sender_name = (
                     self.manual_sender_names.get(sender_id_int) or 
@@ -1108,7 +1111,6 @@ class HeyReachClient:
         else:
             # Fallback: try API if no manual config
             try:
-                # Force API fetch when getting performance data
                 linkedin_accounts = self.get_linkedin_accounts(force_api=True)
                 if linkedin_accounts:
                     logger.info(f"Found {len(linkedin_accounts)} LinkedIn accounts from API")
@@ -1135,8 +1137,7 @@ class HeyReachClient:
                         'senders': {}
                     }
             else:
-                # No accounts and no specific sender_id - return empty
-                logger.warning("No LinkedIn accounts found. Please configure sender_ids in config.yaml or environment variables.")
+                logger.warning("No LinkedIn accounts found.")
                 return {
                     'start_date': start_date_obj.strftime('%Y-%m-%d'),
                     'end_date': end_date_obj.strftime('%Y-%m-%d'),
@@ -1155,20 +1156,10 @@ class HeyReachClient:
                 }
         
         # Generate list of weeks (Saturday to Friday)
-        # weekday(): Monday=0, Tuesday=1, Wednesday=2, Thursday=3, Friday=4, Saturday=5, Sunday=6
         weeks = []
-        
-        # Find the Saturday that starts the week containing start_date
         start_weekday = start_date_obj.weekday()
         
         # Calculate days to go back to get to Saturday
-        # If it's Saturday (5), we're already there (0 days back)
-        # If it's Sunday (6), go back 1 day
-        # If it's Monday (0), go back 2 days
-        # If it's Tuesday (1), go back 3 days
-        # If it's Wednesday (2), go back 4 days
-        # If it's Thursday (3), go back 5 days
-        # If it's Friday (4), go back 6 days
         if start_weekday == 5:  # Saturday
             days_back = 0
         elif start_weekday == 6:  # Sunday
@@ -1176,156 +1167,39 @@ class HeyReachClient:
         else:  # Monday (0) through Friday (4)
             days_back = start_weekday + 2
         
-        # Find the Saturday that starts the week
         first_saturday = start_date_obj - timedelta(days=days_back)
-        
-        # Generate week ranges
         current_week_start = first_saturday
         week_count = 0
-        max_weeks = 52  # Safety limit to prevent infinite loops
+        max_weeks = 52
         
         while current_week_start <= end_date_obj and week_count < max_weeks:
-            week_end = current_week_start + timedelta(days=6)  # Friday of this week
+            week_end = current_week_start + timedelta(days=6)  # Friday
             
-            # Only add week if it overlaps with our date range
             if week_end >= start_date_obj:
-                # Adjust boundaries if needed
                 effective_start = max(current_week_start, start_date_obj)
                 effective_end = min(week_end, end_date_obj)
                 
                 weeks.append({
                     'start': effective_start,
                     'end': effective_end,
-                    'key': week_end.strftime('%Y-%m-%d')  # Use Friday (end date) as week identifier
+                    'key': week_end.strftime('%Y-%m-%d')  # Friday as week identifier
                 })
             
-            # Move to next Saturday
             current_week_start = current_week_start + timedelta(days=7)
             week_count += 1
         
-        # Store weekly data by sender
-        sender_weekly_data = defaultdict(lambda: defaultdict(lambda: {
-            'connections_sent': 0,
-            'connections_accepted': 0,
-            'messages_sent': 0,
-            'message_replies': 0,
-            'open_conversations': 0,
-            'interested': 0,
-            'leads_not_enrolled': 0
-        }))
+        # Store week objects by key for later formatting
+        week_objects_by_key = {week['key']: week for week in weeks}
         
-        # Store week objects by key for later use in formatting
-        week_objects_by_key = {}
-        for week in weeks:
-            week_objects_by_key[week['key']] = week
-        
-        # Use parallel processing for API calls to avoid timeout when "all" is selected
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        
-        def fetch_sender_week_stats(account, week):
-            """Fetch stats for a single sender-week combination with retry logic"""
-            account_id = account.get('id')
-            account_id_int = int(account_id) if account_id and isinstance(account_id, (str, float)) else account_id
-            
-            # Get sender name with proper fallback order
-            # Priority: 1) manual_sender_names (config.yaml), 2) account name from API, 3) fallback
-            sender_name = None
-            
-            # First try manual_sender_names (from config.yaml) - this is the most reliable
-            if account_id_int:
-                sender_name = self.manual_sender_names.get(account_id_int)
-            if not sender_name and account_id:
-                sender_name = self.manual_sender_names.get(account_id)
-            
-            # If not in config, use account name from API (which should already be mapped)
-            if not sender_name:
-                sender_name = account.get('linkedInUserListName') or account.get('name')
-            
-            # Final fallback - but this should rarely happen if config.yaml is set up correctly
-            if not sender_name:
-                sender_name = f"Sender {account_id}"
-            
-            # Double-check: if we used fallback but the name exists in manual_sender_names, use it
-            if sender_name and sender_name.startswith('Sender ') and account_id_int:
-                # Check if we should have found it in manual_sender_names
-                expected_name = self.manual_sender_names.get(account_id_int) or self.manual_sender_names.get(account_id)
-                if expected_name:
-                    logger.warning(f"⚠️ Sender name lookup failed for ID {account_id} (int: {account_id_int}), but found in manual_sender_names: {expected_name}. Using expected name instead of fallback.")
-                    # Use the expected name instead
-                    sender_name = expected_name
-                elif len(self.manual_sender_names) > 0:
-                    logger.debug(f"Sender ID {account_id} (int: {account_id_int}) not found in manual_sender_names (has {len(self.manual_sender_names)} entries). Available keys: {list(self.manual_sender_names.keys())[:10]}...")
-            
-            week_start_iso = week['start'].strftime('%Y-%m-%dT00:00:00.000Z')
-            week_end_iso = week['end'].strftime('%Y-%m-%dT23:59:59.999Z')
-            
-            api_account_id = account_id_int if account_id_int else account_id
-            
-            # Retry logic for rate limits
-            max_retries = 3
-            retry_delay = 2.0  # Start with 2 seconds
-            
-            for attempt in range(max_retries):
-                try:
-                    stats = self.get_overall_stats(
-                        account_ids=[api_account_id],
-                        campaign_ids=[],
-                        start_date=week_start_iso,
-                        end_date=week_end_iso
-                    )
-                    
-                    return {
-                        'account': account,
-                        'account_id': account_id,
-                        'account_id_int': account_id_int,
-                        'sender_name': sender_name,
-                        'week': week,
-                        'stats': stats
-                    }
-                except Exception as e:
-                    error_str = str(e)
-                    if ('429' in error_str or 'rate limit' in error_str.lower() or 'too many' in error_str.lower()) and attempt < max_retries - 1:
-                        # Exponential backoff for rate limits
-                        wait_time = retry_delay * (2 ** attempt)
-                        logger.debug(f"Rate limit hit for {sender_name} week {week['key']}, waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        # Re-raise if not a rate limit or if we've exhausted retries
-                        raise
-            
-            # If all retries failed, return empty stats
-            logger.warning(f"Failed to fetch stats for {sender_name} week {week['key']} after {max_retries} retries")
-            return {
-                'account': account,
-                'account_id': account_id,
-                'account_id_int': account_id_int,
-                'sender_name': sender_name,
-                'week': week,
-                'stats': {}
-            }
-        
-        # Create list of all sender-week combinations for parallel processing
-        tasks = []
-        for account in linkedin_accounts:
-            for week in weeks:
-                tasks.append((account, week))
-        
-        logger.info(f"Processing {len(tasks)} sender-week combinations in parallel...")
-        
-        # Process tasks in parallel with ThreadPoolExecutor
-        # LIMITED workers to reduce memory usage on Render free plan (512MB RAM limit)
-        # Trade-off: slower but uses less memory
-        max_workers = min(5, len(tasks))  # Reduced to 5 to minimize memory usage
-        
-        first_result_logged = False
+        # MEMORY-EFFICIENT: Use simple dict instead of defaultdict
+        # Store only final processed data, not raw API responses
+        sender_weekly_data = {}
         
         def get_field_value(stats_dict, *field_names, default=0):
-            """Get field value, trying multiple field names, handling 0 correctly"""
+            """Get field value, trying multiple field names"""
             if not isinstance(stats_dict, dict):
                 return default
             for field_name in field_names:
-                # Try exact match first
                 if field_name in stats_dict:
                     value = stats_dict[field_name]
                     if value is not None:
@@ -1333,173 +1207,112 @@ class HeyReachClient:
                             return float(value) if isinstance(value, (int, float, str)) else default
                         except (ValueError, TypeError):
                             return default
-                # Try case-insensitive match
-                for key in stats_dict.keys():
-                    if key.lower() == field_name.lower():
-                        value = stats_dict[key]
-                        if value is not None:
-                            try:
-                                return float(value) if isinstance(value, (int, float, str)) else default
-                            except (ValueError, TypeError):
-                                return default
             return default
         
-        # Small batches to limit memory usage on Render free plan
-        import time
-        import gc  # Garbage collector for memory management
-        batch_size = max_workers  # Process one batch at a time
-        batch_delay = 0.05  # Minimal delay between batches
+        def get_sender_name(account):
+            """Get sender name with proper fallback"""
+            account_id = account.get('id')
+            account_id_int = int(account_id) if account_id and isinstance(account_id, (str, float)) else account_id
+            
+            sender_name = None
+            if account_id_int:
+                sender_name = self.manual_sender_names.get(account_id_int)
+            if not sender_name and account_id:
+                sender_name = self.manual_sender_names.get(account_id)
+            if not sender_name:
+                sender_name = account.get('linkedInUserListName') or account.get('name')
+            if not sender_name:
+                sender_name = f"Sender {account_id}"
+            return sender_name, account_id_int if account_id_int else account_id
         
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all tasks, but process in batches with delays
-            future_to_task = {executor.submit(fetch_sender_week_stats, account, week): (account, week) 
-                             for account, week in tasks}
+        # Create task list
+        tasks = [(account, week) for account in linkedin_accounts for week in weeks]
+        total_tasks = len(tasks)
+        
+        logger.info(f"Processing {total_tasks} sender-week combinations (memory-optimized sequential mode)...")
+        
+        # MEMORY-OPTIMIZED: Process in small sequential batches
+        # Instead of ThreadPoolExecutor which creates all futures at once
+        batch_size = 3  # Very small batches for memory efficiency
+        completed = 0
+        first_result_logged = False
+        rate_limit_errors = 0
+        base_delay = 0.1  # Base delay between API calls (seconds)
+        
+        for i in range(0, total_tasks, batch_size):
+            batch = tasks[i:i + batch_size]
             
-            # Process completed tasks
-            completed = 0
-            rate_limit_errors = 0
-            last_batch_time = time.time()
-            
-            for future in as_completed(future_to_task):
+            for account, week in batch:
                 completed += 1
+                sender_name, api_account_id = get_sender_name(account)
                 
-                # Free memory after each batch - critical for Render free plan (512MB limit)
-                if completed % batch_size == 0:
-                    gc.collect()  # Force garbage collection to free memory
-                    elapsed = time.time() - last_batch_time
-                    if elapsed < batch_delay:
-                        sleep_time = batch_delay - elapsed
-                        if sleep_time > 0:
-                            time.sleep(sleep_time)
-                    last_batch_time = time.time()
+                week_start_iso = week['start'].strftime('%Y-%m-%dT00:00:00.000Z')
+                week_end_iso = week['end'].strftime('%Y-%m-%dT23:59:59.999Z')
                 
-                try:
-                    result = future.result()
-                    account = result['account']
-                    account_id = result['account_id']
-                    account_id_int = result['account_id_int']
-                    sender_name = result['sender_name']
-                    week = result['week']
-                    stats = result['stats']
-                    
-                    # Reset rate limit error counter on success
-                    if rate_limit_errors > 0:
+                # Make API call with retry logic
+                stats = None
+                max_retries = 2  # Reduced retries for speed
+                
+                for attempt in range(max_retries):
+                    try:
+                        stats = self.get_overall_stats(
+                            account_ids=[api_account_id],
+                            campaign_ids=[],
+                            start_date=week_start_iso,
+                            end_date=week_end_iso
+                        )
                         rate_limit_errors = max(0, rate_limit_errors - 1)
+                        break
+                    except Exception as e:
+                        error_str = str(e)
+                        if '429' in error_str or 'rate limit' in error_str.lower():
+                            rate_limit_errors += 1
+                            if attempt < max_retries - 1:
+                                wait_time = base_delay * (2 ** (attempt + rate_limit_errors))
+                                wait_time = min(wait_time, 5.0)  # Cap at 5 seconds
+                                time.sleep(wait_time)
+                                continue
+                        logger.warning(f"API error for {sender_name}: {str(e)[:100]}")
+                        stats = {}
+                        break
+                
+                # Log first result structure
+                if not first_result_logged and stats and isinstance(stats, dict) and len(stats) > 0:
+                    logger.info(f"📊 First API response keys: {list(stats.keys())}")
+                    first_result_logged = True
+                
+                # MEMORY-EFFICIENT: Process and store only essential data immediately
+                if stats and isinstance(stats, dict):
+                    if sender_name not in sender_weekly_data:
+                        sender_weekly_data[sender_name] = {}
                     
-                    # Log progress
-                    if completed % 10 == 0 or completed == len(tasks):
-                        logger.info(f"Processed {completed}/{len(tasks)} API calls...")
-                    
-                    # Log the full response structure on first successful call
-                    if not first_result_logged and stats and isinstance(stats, dict):
-                        logger.info(f"📊 GetOverallStats Response Structure (First Call):")
-                        logger.info(f"   Response type: {type(stats).__name__}")
-                        logger.info(f"   Keys: {list(stats.keys())}")
-                        full_response = json.dumps(stats, indent=2, default=str)
-                        logger.info(f"   Full response:\n{full_response}")
-                        first_result_logged = True
-                    
-                    # Check if stats is a valid dict (even if empty - that's valid data)
-                    if stats is None:
-                        logger.warning(f"    ⚠️ Stats is None for {sender_name} week {week['key']} - API call may have failed")
-                        # Use default 0s
-                    elif not isinstance(stats, dict):
-                        logger.warning(f"    ⚠️ Stats is not a dict for {sender_name} week {week['key']} - type: {type(stats).__name__}, value: {str(stats)[:200]}")
-                        # Use default 0s
-                    else:
-                        # Empty dict is valid - means no data for this period
-                        if len(stats) == 0:
-                            logger.debug(f"    Empty stats response for {sender_name} week {week['key']} - no data for this period")
-                            # Continue - we'll show 0s which is correct
-                        
-                        # Extract metrics from stats response
-                        week_data = sender_weekly_data[sender_name][week['key']]
-                        
-                        # HeyReach API field names (based on actual API response)
-                        week_data['connections_sent'] = get_field_value(
-                            stats, 
-                            'connectionsSent',  # HeyReach API field name
-                            'connectionRequestsSent', 'connectionRequests', 
-                            'invitesSent', 'sentConnections', 'totalConnectionsSent',
-                            'connectionRequestsCount', 'invitesSentCount'
-                        )
-                        
-                        week_data['connections_accepted'] = get_field_value(
-                            stats, 
-                            'connectionsAccepted',  # HeyReach API field name
-                            'acceptedConnections', 'invitesAccepted', 
-                            'acceptedInvites', 'totalConnectionsAccepted',
-                            'acceptedConnectionRequests', 'acceptedInvitesCount'
-                        )
-                        
-                        week_data['messages_sent'] = get_field_value(
-                            stats, 
-                            'totalMessageStarted',  # Use totalMessageStarted for messages sent (as per user requirement)
-                            'messagesSent',  # Fallback to messagesSent if totalMessageStarted not available
-                            'sentMessages', 'totalMessagesSent', 'messages',
-                            'messageCount', 'totalMessages', 'messagesSentCount'
-                        )
-                        
-                        week_data['message_replies'] = get_field_value(
-                            stats, 
-                            'totalMessageReplies',  # HeyReach API field name
-                            'repliesReceived', 'replies', 'messageReplies', 
-                            'totalReplies', 'repliesCount', 'replyCount'
-                        )
-                        
-                        # Note: totalMessageStarted is now used for messages_sent
-                        # For open_conversations, we need to find a different field or calculate it
-                        week_data['open_conversations'] = get_field_value(
-                            stats, 
-                            'openConversations', 'activeConversations', 
-                            'conversations', 'activeChats', 'messageStarted',
-                            'totalMessageStarted'  # Fallback if no other field available
-                        )
-                        
-                        # Note: HeyReach API doesn't seem to have explicit "interested" or "leads_not_enrolled" fields
-                        week_data['interested'] = get_field_value(
-                            stats, 
-                            'interested', 'interestedLeads', 
-                            'leadsInterested', 'interestedCount', 'interestedLeadsCount'
-                        )
-                        
-                        week_data['leads_not_enrolled'] = get_field_value(
-                            stats, 
-                            'leadsNotEnrolled', 'pendingLeads', 
-                            'notEnrolled', 'pending', 'pendingLeadsCount'
-                        )
-                        
-                        # Log extracted values for debugging (only for first few to avoid spam)
-                        if completed <= 3:
-                            logger.info(f"📊 Extracted metrics for {sender_name} (ID: {account_id}, week {week['key']}):")
-                            logger.info(f"   Connections Sent: {week_data['connections_sent']}")
-                            logger.info(f"   Connections Accepted: {week_data['connections_accepted']}")
-                            logger.info(f"   Messages Sent: {week_data['messages_sent']}")
-                            logger.info(f"   Message Replies: {week_data['message_replies']}")
-                            logger.info(f"   Open Conversations: {week_data['open_conversations']}")
-                        
-                        logger.debug(f"    Week {week['key']} Stats for {sender_name}: {week_data}")
-                        
-                except Exception as e:
-                    account, week = future_to_task[future]
-                    error_str = str(e)
-                    
-                    # Check if it's a rate limit error
-                    if '429' in error_str or 'rate limit' in error_str.lower() or 'too many' in error_str.lower():
-                        rate_limit_errors += 1
-                        logger.warning(f"Rate limit error ({rate_limit_errors}) for {account.get('id')} week {week['key']}: {e}")
-                        
-                        # If we're getting too many rate limit errors, increase delay slightly
-                        if rate_limit_errors >= 5:
-                            batch_delay = min(batch_delay * 1.5, 1.0)  # Max 1 second to avoid timeout
-                            logger.warning(f"Increasing batch delay to {batch_delay}s due to rate limits")
-                            rate_limit_errors = 0  # Reset counter
-                    else:
-                        logger.error(f"Error processing {account.get('id')} week {week['key']}: {e}")
-                        import traceback
-                        logger.error(traceback.format_exc())
+                    sender_weekly_data[sender_name][week['key']] = {
+                        'connections_sent': get_field_value(stats, 'connectionsSent', 'connectionRequestsSent'),
+                        'connections_accepted': get_field_value(stats, 'connectionsAccepted', 'acceptedConnections'),
+                        'messages_sent': get_field_value(stats, 'totalMessageStarted', 'messagesSent'),
+                        'message_replies': get_field_value(stats, 'totalMessageReplies', 'repliesReceived'),
+                        'open_conversations': get_field_value(stats, 'openConversations', 'totalMessageStarted'),
+                        'interested': get_field_value(stats, 'interested', 'interestedLeads'),
+                        'leads_not_enrolled': get_field_value(stats, 'leadsNotEnrolled', 'pendingLeads')
+                    }
+                
+                # Clear the stats dict reference
+                stats = None
+                
+                # Small delay to avoid rate limiting
+                if rate_limit_errors > 3:
+                    time.sleep(base_delay * 2)
+                else:
+                    time.sleep(base_delay)
+                
+                # Log progress every 20 tasks
+                if completed % 20 == 0 or completed == total_tasks:
+                    logger.info(f"Processed {completed}/{total_tasks} API calls...")
+            
+            # CRITICAL: Force garbage collection after each batch
+            gc.collect()
         
-        logger.info(f"Completed processing all {len(tasks)} sender-week combinations")
+        logger.info(f"Completed processing all {total_tasks} sender-week combinations")
         
         # Format data for response - group by client if client groups are available
         result = {
@@ -1586,10 +1399,14 @@ class HeyReachClient:
         for sender_name, weekly_data in senders_without_client:
             result['senders'][sender_name] = format_weeks_data(weekly_data, week_objects_by_key)
         
+        # MEMORY CLEANUP: Clear intermediate data structures
+        sender_weekly_data.clear()
+        senders_by_client.clear()
+        senders_without_client.clear()
+        gc.collect()
+        
         # Log summary
         logger.info(f"📊 Formatted data: {len(result['senders'])} senders, {len(result['clients'])} clients")
-        total_weeks = sum(len(weeks) for weeks in result['senders'].values())
-        logger.info(f"📊 Total weeks of data: {total_weeks}")
         
         return result
     
