@@ -61,8 +61,8 @@ class HeyReachClient:
         
         adapter = HTTPAdapter(
             max_retries=retry_strategy,
-            pool_connections=20,  # Number of connection pools to cache
-            pool_maxsize=20,      # Maximum number of connections to save in the pool
+            pool_connections=5,   # Reduced for Render free plan memory limits
+            pool_maxsize=5,       # Match max_workers to minimize memory usage
         )
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
@@ -1314,9 +1314,9 @@ class HeyReachClient:
         logger.info(f"Processing {len(tasks)} sender-week combinations in parallel...")
         
         # Process tasks in parallel with ThreadPoolExecutor
-        # Increased workers and reduced delays to complete faster and avoid Render platform timeout
-        # Render has a 30-60s platform-level timeout that overrides Gunicorn settings
-        max_workers = min(25, len(tasks))  # Increased to 25 to process faster
+        # LIMITED workers to reduce memory usage on Render free plan (512MB RAM limit)
+        # Trade-off: slower but uses less memory
+        max_workers = min(5, len(tasks))  # Reduced to 5 to minimize memory usage
         
         first_result_logged = False
         
@@ -1344,10 +1344,11 @@ class HeyReachClient:
                                 return default
             return default
         
-        # Minimal delays to process faster - rely on retry strategy for rate limits
+        # Small batches to limit memory usage on Render free plan
         import time
-        batch_size = max_workers * 2  # Process 2x workers at a time
-        batch_delay = 0.1  # Minimal delay - retry strategy handles rate limits
+        import gc  # Garbage collector for memory management
+        batch_size = max_workers  # Process one batch at a time
+        batch_delay = 0.05  # Minimal delay between batches
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks, but process in batches with delays
@@ -1362,13 +1363,14 @@ class HeyReachClient:
             for future in as_completed(future_to_task):
                 completed += 1
                 
-                # Add delay between batches to avoid rate limits
+                # Free memory after each batch - critical for Render free plan (512MB limit)
                 if completed % batch_size == 0:
+                    gc.collect()  # Force garbage collection to free memory
                     elapsed = time.time() - last_batch_time
                     if elapsed < batch_delay:
                         sleep_time = batch_delay - elapsed
-                        logger.debug(f"Batch of {batch_size} complete, waiting {sleep_time:.2f}s to avoid rate limits...")
-                        time.sleep(sleep_time)
+                        if sleep_time > 0:
+                            time.sleep(sleep_time)
                     last_batch_time = time.time()
                 
                 try:
