@@ -1001,12 +1001,12 @@ def send_to_apps_script():
                 first_week = first_sender['weeks'][0]
                 logger.info(f"First week example: week_start='{first_week.get('week_start')}', week_end='{first_week.get('week_end')}', keys={list(first_week.keys())}")
         
-        # Send to Apps Script
+        # Send to Apps Script (increased timeout for large datasets)
         try:
             response = requests.post(
                 apps_script_url,
                 json=formatted_data,
-                timeout=30
+                timeout=300  # 5 minutes for large datasets
             )
             response.raise_for_status()
             
