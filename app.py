@@ -489,9 +489,19 @@ def get_client_for_request():
     if api_key:
         base_url = session.get('heyreach_base_url', 'https://api.heyreach.io')
         # Get sender mapping from session (loaded from config.yaml during initialization)
-        sender_names = session.get('sender_names', {})
+        sender_names_raw = session.get('sender_names', {})
         sender_ids = session.get('sender_ids', [])
         client_groups = session.get('client_groups', {})
+        
+        # CRITICAL: Flask session serializes to JSON, converting int keys to strings
+        # Convert string keys back to integers for proper lookup
+        sender_names = {}
+        for key, value in sender_names_raw.items():
+            try:
+                key_int = int(key) if isinstance(key, str) else key
+                sender_names[key_int] = value
+            except (ValueError, TypeError):
+                sender_names[key] = value
         
         return HeyReachClient(
             api_key=api_key,
@@ -897,29 +907,83 @@ def send_to_apps_script():
             return jsonify({'error': 'No data available for the selected date range'}), 400
         
         # Get sender_names mapping from session
-        sender_names = session.get('sender_names', {})
+        sender_names_raw = session.get('sender_names', {})
+        client_groups_raw = session.get('client_groups', {})
         
-        # Format data for Apps Script with sender IDs
+        # CRITICAL: Flask session serializes to JSON, converting int keys to strings
+        # Convert string keys back to integers for proper lookup
+        sender_names = {}
+        for key, value in sender_names_raw.items():
+            try:
+                key_int = int(key) if isinstance(key, str) else key
+                sender_names[key_int] = value
+            except (ValueError, TypeError):
+                sender_names[key] = value
+        
+        # Process client_groups - convert sender_ids to integers
+        client_groups = {}
+        for client_name, client_data in client_groups_raw.items():
+            if isinstance(client_data, dict):
+                sender_ids_raw = client_data.get('sender_ids', [])
+            elif isinstance(client_data, list):
+                sender_ids_raw = client_data
+            else:
+                continue
+            
+            # Convert sender IDs to integers
+            sender_ids = []
+            for sid in sender_ids_raw:
+                try:
+                    sender_ids.append(int(sid) if isinstance(sid, str) else sid)
+                except (ValueError, TypeError):
+                    sender_ids.append(sid)
+            
+            client_groups[client_name] = {
+                'sender_ids': sender_ids
+            }
+        
+        # Format data for Apps Script with sender IDs and client groups
         formatted_data = {
             'date_range': {
                 'start': start_date,
                 'end': end_date
             },
             'senders': [],
-            'sender_id_mapping': {}  # Map sender names to IDs for matching
+            'sender_id_mapping': {},  # Map sender names to IDs for matching
+            'client_groups': client_groups  # Include client groups for sheet matching
         }
         
-        # Build reverse mapping: name -> ID
+        # Build reverse mapping: name -> ID (for Apps Script to look up by name)
         for sender_id, name in sender_names.items():
             formatted_data['sender_id_mapping'][name] = sender_id
         
+        logger.info(f"Client groups being sent: {list(client_groups.keys())}")
+        
+        # Log the sender_names mapping for debugging
+        logger.info(f"Sender names mapping has {len(sender_names)} entries")
+        if len(sender_names) > 0:
+            first_key = list(sender_names.keys())[0]
+            logger.info(f"Sample sender_names entry: {first_key} (type: {type(first_key).__name__}) -> {sender_names[first_key]}")
+        
         for sender_name, weeks_data in performance_data.get('senders', {}).items():
-            # Find sender ID from mapping
+            # Find sender ID from mapping (reverse lookup: name -> ID)
             sender_id = None
             for mapped_name, mapped_id in formatted_data['sender_id_mapping'].items():
                 if mapped_name.lower() == sender_name.lower() or sender_name.lower() in mapped_name.lower():
                     sender_id = mapped_id
                     break
+            
+            # If still not found, try to extract ID from "Sender XXXXX" format
+            if sender_id is None and sender_name.startswith('Sender '):
+                try:
+                    sender_id = int(sender_name.replace('Sender ', ''))
+                    # Also get the real name from sender_names if available
+                    real_name = sender_names.get(sender_id)
+                    if real_name:
+                        sender_name = real_name
+                        logger.info(f"Resolved 'Sender {sender_id}' to '{real_name}'")
+                except ValueError:
+                    pass
             
             sender_data = {
                 'name': sender_name,
@@ -947,16 +1011,41 @@ def send_to_apps_script():
             response.raise_for_status()
             
             # Parse response to get detailed results
+            response_data = None
             try:
                 response_data = response.json()
                 logger.info(f"Apps Script response: {response_data}")
             except:
                 logger.info(f"Apps Script response (text): {response.text[:500]}")
             
+            # Build detailed response message
+            message = f'Data sent to Apps Script. {len(formatted_data["senders"])} senders.'
+            details = {}
+            
+            if response_data and isinstance(response_data, dict):
+                results = response_data.get('results', {})
+                processed = results.get('processed', [])
+                not_found = results.get('not_found', [])
+                errors = results.get('errors', [])
+                debug = results.get('debug', {})
+                
+                message = f'Processed {len(processed)} senders, {len(not_found)} not found.'
+                
+                if processed:
+                    details['processed'] = [f"{p.get('sender')} → {p.get('sheet')} (row {p.get('row')}, {p.get('cells_updated')} cells)" for p in processed[:5]]
+                if not_found:
+                    details['not_found'] = [f"{n.get('sender')}: {n.get('reason')}" for n in not_found[:10]]
+                if errors:
+                    details['errors'] = [f"{e.get('sender')}: {e.get('error')}" for e in errors[:5]]
+                if debug:
+                    details['sheets_found'] = debug.get('sheets_available', [])
+                    details['client_groups_received'] = debug.get('client_groups', [])
+            
             return jsonify({
                 'success': True,
-                'message': f'Data sent successfully to Apps Script. {len(formatted_data["senders"])} senders processed.',
-                'response': response.text[:500] if response.text else 'Success'
+                'message': message,
+                'details': details,
+                'response': response.text[:1000] if response.text else 'Success'
             })
         except requests.exceptions.RequestException as e:
             logger.error(f"Error sending to Apps Script: {e}")

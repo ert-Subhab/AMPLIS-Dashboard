@@ -831,7 +831,48 @@ async function sendToAppsScript() {
             throw new Error(data.error || 'Failed to send data to Apps Script');
         }
         
-        showMessage(data.message || 'Data sent successfully to Apps Script!', 'success');
+        // Build detailed message
+        let message = data.message || 'Data sent successfully!';
+        
+        // Log full response to console for debugging
+        console.log('Apps Script Response:', data);
+        
+        // Show details if available
+        if (data.details) {
+            const details = data.details;
+            
+            if (details.processed && details.processed.length > 0) {
+                message += '\n\n✅ Processed:\n' + details.processed.join('\n');
+            }
+            
+            if (details.not_found && details.not_found.length > 0) {
+                message += '\n\n⚠️ Not Found:\n' + details.not_found.slice(0, 5).join('\n');
+                if (details.not_found.length > 5) {
+                    message += `\n... and ${details.not_found.length - 5} more`;
+                }
+            }
+            
+            if (details.errors && details.errors.length > 0) {
+                message += '\n\n❌ Errors:\n' + details.errors.join('\n');
+            }
+            
+            // Show sheets found
+            if (details.sheets_found && details.sheets_found.length > 0) {
+                console.log('Sheets found in spreadsheet:', details.sheets_found);
+            }
+            if (details.client_groups_received && details.client_groups_received.length > 0) {
+                console.log('Client groups received:', details.client_groups_received);
+            }
+        }
+        
+        // Use alert for detailed feedback (since it can show newlines)
+        if (data.details && (data.details.not_found?.length > 0 || data.details.errors?.length > 0)) {
+            alert(message);
+            showMessage('Check the alert for details. Also check browser console (F12) for more info.', 'info');
+        } else {
+            showMessage(message, 'success');
+        }
+        
         showLoading(false);
         
     } catch (error) {
