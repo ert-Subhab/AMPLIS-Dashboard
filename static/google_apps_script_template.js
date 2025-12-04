@@ -1,6 +1,6 @@
 /**
- * Google Apps Script for HeyReach Data Integration (OPTIMIZED)
- * Uses batch updates for speed - processes 70+ senders quickly
+ * Google Apps Script for HeyReach Data Integration
+ * AUTO-CREATES new date columns if they don't exist
  */
 
 function doPost(e) {
@@ -21,6 +21,7 @@ function doPost(e) {
     const results = {
       processed: [],
       not_found: [],
+      columns_created: [],
       errors: []
     };
     
@@ -89,6 +90,7 @@ function doPost(e) {
         const batchResult = processSheetBatch(sheetData.sheet, sheetData.senders);
         results.processed.push(...batchResult.processed);
         results.not_found.push(...batchResult.not_found);
+        results.columns_created.push(...batchResult.columns_created);
       } catch (err) {
         results.errors.push({ sheet: sheetName, error: err.toString() });
       }
@@ -96,7 +98,7 @@ function doPost(e) {
     
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
-      message: `Processed ${results.processed.length} senders, ${results.not_found.length} not found`,
+      message: `Processed ${results.processed.length} senders, ${results.not_found.length} not found, ${results.columns_created.length} new columns created`,
       results: results
     })).setMimeType(ContentService.MimeType.JSON);
     
@@ -110,36 +112,82 @@ function doPost(e) {
 
 /**
  * Process all senders for a sheet using batch updates
+ * AUTO-CREATES new date columns if they don't exist
  */
 function processSheetBatch(sheet, senders) {
-  const result = { processed: [], not_found: [] };
+  const result = { processed: [], not_found: [], columns_created: [] };
   
-  // Get all data from sheet at once (faster than individual reads)
+  // Get all data from sheet at once
   const dataRange = sheet.getDataRange();
-  const allValues = dataRange.getValues();
-  const numRows = allValues.length;
-  const numCols = allValues[0] ? allValues[0].length : 0;
+  let allValues = dataRange.getValues();
+  let numRows = allValues.length;
+  let numCols = allValues[0] ? allValues[0].length : 0;
   
-  if (numRows === 0 || numCols === 0) return result;
+  if (numRows === 0) return result;
   
   // Get header row for week columns
-  const headerRow = allValues[0];
+  let headerRow = allValues[0];
   
-  // Build week column map
+  // Build week column map and find last week column
   const weekColumns = {};
+  let lastWeekCol = 0;
+  
   for (let col = 1; col < numCols; col++) {
     const headerVal = headerRow[col];
     if (headerVal) {
       const headerStr = String(headerVal).trim();
-      // Store both original and parsed versions
-      weekColumns[headerStr] = col;
-      // Also store M/D format
-      const parts = headerStr.split('/');
-      if (parts.length === 2) {
+      // Check if it's a date format (M/D)
+      if (/^\d{1,2}\/\d{1,2}$/.test(headerStr)) {
+        lastWeekCol = col;
+        weekColumns[headerStr] = col;
+        // Also store normalized version
+        const parts = headerStr.split('/');
         const normalized = parseInt(parts[0]) + '/' + parseInt(parts[1]);
         weekColumns[normalized] = col;
       }
     }
+  }
+  
+  // If no week columns found, start after column A
+  if (lastWeekCol === 0) {
+    lastWeekCol = 0; // Will become 1 when we add first column
+  }
+  
+  // Collect all unique week dates from all senders
+  const allWeekDates = new Set();
+  for (const sender of senders) {
+    for (const week of sender.weeks) {
+      const weekDate = week.week_end || week.week_start;
+      if (weekDate) {
+        const weekKey = formatWeekKey(weekDate);
+        if (weekKey) allWeekDates.add(weekKey);
+      }
+    }
+  }
+  
+  // Create columns for any missing week dates
+  const sortedWeekDates = Array.from(allWeekDates).sort((a, b) => {
+    const [aMonth, aDay] = a.split('/').map(Number);
+    const [bMonth, bDay] = b.split('/').map(Number);
+    if (aMonth !== bMonth) return aMonth - bMonth;
+    return aDay - bDay;
+  });
+  
+  for (const weekKey of sortedWeekDates) {
+    if (!weekColumns[weekKey]) {
+      // Need to create this column
+      lastWeekCol++;
+      sheet.getRange(1, lastWeekCol + 1).setValue(weekKey);
+      weekColumns[weekKey] = lastWeekCol;
+      result.columns_created.push({ sheet: sheet.getName(), column: weekKey, position: lastWeekCol + 1 });
+    }
+  }
+  
+  // Refresh data if we added columns
+  if (result.columns_created.length > 0) {
+    SpreadsheetApp.flush();
+    allValues = sheet.getDataRange().getValues();
+    numCols = allValues[0] ? allValues[0].length : 0;
   }
   
   // Metrics offsets from sender row
@@ -154,9 +202,7 @@ function processSheetBatch(sheet, senders) {
     { key: 'interested', offset: 8 }
   ];
   
-  // Collect all updates
-  const updates = [];
-  
+  // Process each sender
   for (const sender of senders) {
     const senderRow = findSenderRowInData(allValues, sender.name);
     
@@ -179,21 +225,21 @@ function processSheetBatch(sheet, senders) {
       for (const metric of metrics) {
         const row = senderRow + metric.offset;
         
-        // Check if cell is empty (row and col are 0-indexed in allValues)
-        if (row - 1 < numRows && col < numCols) {
-          const currentVal = allValues[row - 1][col];
+        // Check if cell is empty
+        const currentVal = (row - 1 < allValues.length && col < allValues[row - 1].length) 
+          ? allValues[row - 1][col] 
+          : '';
+        
+        if (currentVal === '' || currentVal === null || currentVal === undefined) {
+          let value = week[metric.key];
+          if (value === undefined || value === null) value = 0;
           
-          if (currentVal === '' || currentVal === null || currentVal === undefined) {
-            let value = week[metric.key];
-            if (value === undefined || value === null) value = 0;
-            
-            if (metric.isPercent) {
-              value = (typeof value === 'number') ? value.toFixed(2) + '%' : String(value) + '%';
-            }
-            
-            updates.push({ row: row, col: col + 1, value: value }); // +1 for 1-indexed
-            cellsUpdated++;
+          if (metric.isPercent) {
+            value = (typeof value === 'number') ? value.toFixed(2) + '%' : String(value) + '%';
           }
+          
+          sheet.getRange(row, col + 1).setValue(value);
+          cellsUpdated++;
         }
       }
     }
@@ -203,15 +249,7 @@ function processSheetBatch(sheet, senders) {
     }
   }
   
-  // Apply all updates in batches
-  if (updates.length > 0) {
-    // Group updates by row for efficiency
-    for (const update of updates) {
-      sheet.getRange(update.row, update.col).setValue(update.value);
-    }
-    SpreadsheetApp.flush(); // Ensure all updates are applied
-  }
-  
+  SpreadsheetApp.flush();
   return result;
 }
 
