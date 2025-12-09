@@ -962,6 +962,61 @@ def send_to_apps_script():
         for sender_id, name in sender_names.items():
             formatted_data['sender_id_mapping'][name] = sender_id
         
+        def _levenshtein(a: str, b: str, max_dist: int = 2) -> int:
+            """
+            Lightweight Levenshtein distance with early exit; caps at max_dist+1.
+            """
+            if abs(len(a) - len(b)) > max_dist:
+                return max_dist + 1
+            # Ensure a is shorter
+            if len(a) > len(b):
+                a, b = b, a
+            previous = list(range(len(a) + 1))
+            for i, cb in enumerate(b, 1):
+                current = [i]
+                min_row = current[0]
+                for j, ca in enumerate(a, 1):
+                    cost = 0 if ca == cb else 1
+                    insert = previous[j] + 1
+                    delete = current[j - 1] + 1
+                    replace = previous[j - 1] + cost
+                    val = min(insert, delete, replace)
+                    current.append(val)
+                    if val < min_row:
+                        min_row = val
+                previous = current
+                if min_row > max_dist:
+                    return max_dist + 1
+            return previous[-1]
+        
+        def find_sender_id(perf_name: str) -> tuple:
+            """
+            Try to find sender_id for a performance sender name using configured mapping.
+            Returns (sender_id, mapped_name) or (None, perf_name) if not found.
+            """
+            norm_perf = perf_name.lower().strip()
+            perf_parts = norm_perf.split()
+            perf_first = perf_parts[0] if perf_parts else ''
+            perf_last = perf_parts[-1] if len(perf_parts) > 1 else ''
+            
+            for mapped_name, mapped_id in formatted_data['sender_id_mapping'].items():
+                norm_mapped = str(mapped_name).lower().strip()
+                # exact
+                if norm_perf == norm_mapped:
+                    return mapped_id, mapped_name
+                # substring
+                if norm_perf in norm_mapped or norm_mapped in norm_perf:
+                    return mapped_id, mapped_name
+                # first name and fuzzy last name
+                mapped_parts = norm_mapped.split()
+                mapped_first = mapped_parts[0] if mapped_parts else ''
+                mapped_last = mapped_parts[-1] if len(mapped_parts) > 1 else ''
+                if perf_first and perf_first == mapped_first and perf_last and mapped_last:
+                    dist = _levenshtein(perf_last, mapped_last, max_dist=2)
+                    if dist <= 2:
+                        return mapped_id, mapped_name
+            return None, perf_name
+        
         logger.info(f"Client groups being sent: {list(client_groups.keys())}")
         
         # Log the sender_names mapping for debugging
@@ -971,12 +1026,10 @@ def send_to_apps_script():
             logger.info(f"Sample sender_names entry: {first_key} (type: {type(first_key).__name__}) -> {sender_names[first_key]}")
         
         for sender_name, weeks_data in performance_data.get('senders', {}).items():
-            # Find sender ID from mapping (reverse lookup: name -> ID)
-            sender_id = None
-            for mapped_name, mapped_id in formatted_data['sender_id_mapping'].items():
-                if mapped_name.lower() == sender_name.lower() or sender_name.lower() in mapped_name.lower():
-                    sender_id = mapped_id
-                    break
+            # Find sender ID from mapping (reverse/fuzzy lookup: name -> ID)
+            sender_id, resolved_name = find_sender_id(sender_name)
+            if resolved_name:
+                sender_name = resolved_name
             
             # If still not found, try to extract ID from "Sender XXXXX" format
             if sender_id is None and sender_name.startswith('Sender '):
