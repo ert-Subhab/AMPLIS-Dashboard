@@ -425,9 +425,11 @@ class SheetsClient:
             sender_data_map = heyreach_data.get('senders', {}) or {}
             clients_map = heyreach_data.get('clients', {}) or {}
             
-            # If a client name matches the worksheet, scope to that client
+            # If a client name matches (exact or partial) the worksheet title, scope to that client
+            worksheet_title = worksheet_name.lower().strip()
             for client_name, client_senders in clients_map.items():
-                if client_name.lower().strip() == worksheet_name.lower().strip():
+                client_title = str(client_name).lower().strip()
+                if client_title == worksheet_title or client_title in worksheet_title or worksheet_title in client_title:
                     sender_data_map = client_senders or {}
                     break
             
