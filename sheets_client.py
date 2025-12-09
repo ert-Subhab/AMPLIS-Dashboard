@@ -421,6 +421,16 @@ class SheetsClient:
                 'leads_not_enrolled': ['leads not yet enrolled', 'leads not enrolled']
             }
             
+            # Determine which sender data to use based on worksheet title (client name)
+            sender_data_map = heyreach_data.get('senders', {}) or {}
+            clients_map = heyreach_data.get('clients', {}) or {}
+            
+            # If a client name matches the worksheet, scope to that client
+            for client_name, client_senders in clients_map.items():
+                if client_name.lower().strip() == worksheet_name.lower().strip():
+                    sender_data_map = client_senders or {}
+                    break
+            
             # Process each sender in the sheet
             for idx, sheet_sender in enumerate(structure['senders']):
                 sheet_sender_name = sheet_sender['name']
@@ -443,7 +453,7 @@ class SheetsClient:
                 
                 # Find matching HeyReach sender
                 heyreach_sender_data = None
-                for heyreach_sender_name, weeks_data in heyreach_data.get('senders', {}).items():
+                for heyreach_sender_name, weeks_data in sender_data_map.items():
                     # Try exact match first
                     if heyreach_sender_name.lower() == sheet_sender_name.lower():
                         heyreach_sender_data = weeks_data
