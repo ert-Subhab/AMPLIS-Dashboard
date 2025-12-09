@@ -125,8 +125,27 @@ function processSheetBatch(sheet, senders) {
   
   if (numRows === 0) return result;
   
-  // Get header row for week columns
-  let headerRow = allValues[0];
+  // Find the header row that contains week columns (scan first 5 rows for MM/DD)
+  let headerRowIndex = 0;
+  let maxDates = 0;
+  for (let r = 0; r < Math.min(5, numRows); r++) {
+    let dateCount = 0;
+    for (let c = 1; c < numCols; c++) {
+      const cell = allValues[r][c];
+      if (cell) {
+        const cellStr = String(cell).trim();
+        if (/^\d{1,2}\/\d{1,2}$/.test(cellStr)) {
+          dateCount++;
+        }
+      }
+    }
+    if (dateCount > maxDates) {
+      maxDates = dateCount;
+      headerRowIndex = r;
+    }
+  }
+  
+  let headerRow = allValues[headerRowIndex];
   
   // Build week column map and find last week column
   const weekColumns = {};
@@ -176,8 +195,10 @@ function processSheetBatch(sheet, senders) {
   for (const weekKey of sortedWeekDates) {
     if (!weekColumns[weekKey]) {
       // Need to create this column
+      // Insert a new column after the current last week column
+      sheet.insertColumnAfter(lastWeekCol + 1);
       lastWeekCol++;
-      sheet.getRange(1, lastWeekCol + 1).setValue(weekKey);
+      sheet.getRange(headerRowIndex + 1, lastWeekCol + 1).setValue(weekKey);
       weekColumns[weekKey] = lastWeekCol;
       result.columns_created.push({ sheet: sheet.getName(), column: weekKey, position: lastWeekCol + 1 });
     }
