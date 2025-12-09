@@ -215,6 +215,14 @@ async function loadPerformanceData() {
         
         // Fetch performance data
         const response = await fetch(`/api/performance?sender_id=${senderId}&start_date=${startDate}&end_date=${endDate}`);
+        
+        // Handle non-JSON (e.g., HTML error page) responses gracefully
+        const contentType = response.headers.get('content-type') || '';
+        if (!response.ok || !contentType.includes('application/json')) {
+            const rawText = await response.text();
+            throw new Error(`Unexpected response from server: ${rawText.slice(0, 200)}`);
+        }
+        
         const data = await response.json();
         
         if (data.error) {
