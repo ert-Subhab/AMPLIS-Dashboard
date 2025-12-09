@@ -906,9 +906,14 @@ def send_to_apps_script():
         if not performance_data or not performance_data.get('senders'):
             return jsonify({'error': 'No data available for the selected date range'}), 400
         
-        # Get sender_names mapping from session
+        # Get sender_names mapping from session; fallback to global client config
         sender_names_raw = session.get('sender_names', {})
         client_groups_raw = session.get('client_groups', {})
+        
+        if (not sender_names_raw or len(sender_names_raw) == 0) and heyreach_client:
+            sender_names_raw = getattr(heyreach_client, 'manual_sender_names', {}) or {}
+            client_groups_raw = getattr(heyreach_client, 'client_groups', {}) or {}
+            logger.info(f"Falling back to global client mappings: sender_names={len(sender_names_raw)}, client_groups={len(client_groups_raw)}")
         
         # CRITICAL: Flask session serializes to JSON, converting int keys to strings
         # Convert string keys back to integers for proper lookup
