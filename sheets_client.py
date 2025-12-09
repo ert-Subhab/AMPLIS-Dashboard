@@ -110,6 +110,91 @@ class SheetsClient:
             logger.error(f"Error initializing Google Sheets client: {e}")
             raise
     
+    def _normalize_date_string(self, value: str) -> Optional[str]:
+        """
+        Normalize a sheet date header into ISO format (YYYY-MM-DD).
+        Supports common sheet date formats like YYYY-MM-DD, MM/DD/YYYY, MM/DD/YY, and MM/DD.
+        """
+        if value is None:
+            return None
+        
+        value_str = str(value).strip()
+        if not value_str:
+            return None
+        
+        # Try several known formats
+        date_formats = ['%Y-%m-%d', '%m/%d/%Y', '%m/%d/%y', '%Y/%m/%d']
+        for fmt in date_formats:
+            try:
+                return datetime.strptime(value_str, fmt).strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+        
+        # Handle MM/DD without a year by assuming current year
+        if re.match(r'^\d{1,2}/\d{1,2}$', value_str):
+            try:
+                month, day = value_str.split('/')
+                today_year = datetime.now().year
+                parsed = datetime(today_year, int(month), int(day))
+                return parsed.strftime('%Y-%m-%d')
+            except Exception:
+                return None
+        
+        return None
+    
+    def _find_or_create_date_column(self, worksheet, structure: Dict, target_date: str) -> Optional[int]:
+        """
+        Find the column for the target date; if missing, append a new column with that date header.
+        """
+        norm = self._normalize_date_string(target_date)
+        if not norm:
+            return None
+        
+        date_columns = structure.get('date_columns', {})
+        date_row = structure.get('date_row') or 1
+        
+        # Return existing column if found
+        if norm in date_columns:
+            return date_columns[norm]
+        
+        try:
+            # Append a new column at the end
+            new_col_index = worksheet.col_count + 1
+            worksheet.add_cols(1)
+            worksheet.update_cell(date_row, new_col_index, norm)
+            
+            # Track the new column in the local structure for downstream writes
+            date_columns[norm] = new_col_index
+            structure['date_columns'] = date_columns
+            
+            logger.info(f"Added new date column {norm} at index {new_col_index}")
+            return new_col_index
+        except Exception as e:
+            logger.error(f"Error creating date column for {norm}: {e}")
+            return None
+    
+    def _get_metric_rows_for_sender(self, all_values: List[List[str]], start_row_idx: int, end_row_idx: int,
+                                    metric_mapping: Dict[str, List[str]]) -> Dict[str, int]:
+        """
+        Given the full sheet values and the row range for a sender block, find the row index for each metric.
+        Returns 1-indexed row numbers for each metric.
+        """
+        metric_rows = {}
+        for row_idx in range(start_row_idx + 1, end_row_idx):
+            if row_idx >= len(all_values):
+                break
+            row = all_values[row_idx] if row_idx < len(all_values) else []
+            first_cell = row[0].strip().lower() if row and row[0] else ""
+            
+            for metric_key, metric_names in metric_mapping.items():
+                if metric_key in metric_rows:
+                    continue
+                for name in metric_names:
+                    if name in first_cell:
+                        metric_rows[metric_key] = row_idx + 1  # 1-indexed
+                        break
+        return metric_rows
+    
     def get_worksheet_names(self) -> List[str]:
         """Get list of all worksheet names in the spreadsheet"""
         try:
@@ -142,7 +227,9 @@ class SheetsClient:
                 'metrics': {},
                 'date_column': None,
                 'year_cell': None,
-                'data_start_row': None
+                'data_start_row': None,
+                'date_columns': {},
+                'date_row': None
             }
             
             # Common metric names to look for
@@ -159,6 +246,18 @@ class SheetsClient:
                 for col_idx, cell in enumerate(first_row):
                     if cell.isdigit() and len(cell) == 4:  # Year
                         structure['year_cell'] = (1, col_idx + 1)  # 1-indexed
+            
+            # Detect date columns (first row that has date-like values)
+            for row_idx, row in enumerate(all_values):
+                for col_idx, cell in enumerate(row):
+                    norm = self._normalize_date_string(cell)
+                    if norm:
+                        if structure['date_row'] is None:
+                            structure['date_row'] = row_idx + 1  # 1-indexed
+                        structure['date_columns'][norm] = col_idx + 1  # 1-indexed
+                if structure['date_columns']:
+                    # Assume first row with any date headers is the date row
+                    break
             
             # Find senders and metrics
             current_sender = None
@@ -300,14 +399,16 @@ class SheetsClient:
         results = {'updated': 0, 'errors': []}
         
         try:
-            # Parse sheet structure
+            worksheet = self.spreadsheet.worksheet(worksheet_name)
+            all_values = worksheet.get_all_values()
+            
+            # Parse sheet structure (date columns, senders, metric markers)
             structure = self.parse_sheet_structure(worksheet_name)
             
             if not structure['senders']:
                 results['errors'].append(f"No senders found in worksheet '{worksheet_name}'")
                 return results
             
-            # Map HeyReach metrics to sheet metric names
             metric_mapping = {
                 'connections_sent': ['connections sent'],
                 'connections_accepted': ['connections accepted'],
@@ -321,9 +422,24 @@ class SheetsClient:
             }
             
             # Process each sender in the sheet
-            for sheet_sender in structure['senders']:
+            for idx, sheet_sender in enumerate(structure['senders']):
                 sheet_sender_name = sheet_sender['name']
                 sender_row = sheet_sender['row']
+                
+                # Determine the block range for this sender (until next sender or end)
+                next_sender_row = (
+                    structure['senders'][idx + 1]['row']
+                    if idx + 1 < len(structure['senders'])
+                    else len(all_values) + 1  # 1-indexed end
+                )
+                
+                # Locate metric rows inside the sender block
+                metric_rows = self._get_metric_rows_for_sender(
+                    all_values=all_values,
+                    start_row_idx=sender_row - 1,  # convert to 0-index
+                    end_row_idx=next_sender_row - 1,  # exclusive, 0-index
+                    metric_mapping=metric_mapping
+                )
                 
                 # Find matching HeyReach sender
                 heyreach_sender_data = None
@@ -342,74 +458,57 @@ class SheetsClient:
                     logger.debug(f"No HeyReach data found for sender '{sheet_sender_name}'")
                     continue
                 
-                # Aggregate data across all weeks in the date range
-                aggregated = {
-                    'connections_sent': 0,
-                    'connections_accepted': 0,
-                    'messages_sent': 0,
-                    'message_replies': 0,
-                    'open_conversations': 0,
-                    'interested': 0,
-                    'leads_not_enrolled': 0
-                }
-                
+                # Populate each week separately into the correct date column
                 for week_data in heyreach_sender_data:
-                    aggregated['connections_sent'] += week_data.get('connections_sent', 0) or 0
-                    aggregated['connections_accepted'] += week_data.get('connections_accepted', 0) or 0
-                    aggregated['messages_sent'] += week_data.get('messages_sent', 0) or 0
-                    aggregated['message_replies'] += week_data.get('message_replies', 0) or 0
-                    aggregated['open_conversations'] += week_data.get('open_conversations', 0) or 0
-                    aggregated['interested'] += week_data.get('interested', 0) or 0
-                    aggregated['leads_not_enrolled'] += week_data.get('leads_not_enrolled', 0) or 0
-                
-                # Calculate rates
-                acceptance_rate = 0
-                if aggregated['connections_sent'] > 0:
-                    acceptance_rate = (aggregated['connections_accepted'] / aggregated['connections_sent']) * 100
-                
-                reply_rate = 0
-                if aggregated['messages_sent'] > 0:
-                    reply_rate = (aggregated['message_replies'] / aggregated['messages_sent']) * 100
-                
-                # Update cells only if they're empty or need updating
-                # Find metric columns and update values
-                for heyreach_metric, sheet_metric_names in metric_mapping.items():
-                    # Find the column for this metric
-                    metric_col = None
-                    for sheet_metric_name in sheet_metric_names:
-                        for metric_name, col_idx in structure['metrics'].items():
-                            if sheet_metric_name in metric_name:
-                                metric_col = col_idx
-                                break
-                        if metric_col:
-                            break
-                    
-                    if not metric_col:
+                    week_end = week_data.get('week_end') or week_data.get('week_end_date') or week_data.get('weekStart')
+                    if not week_end:
                         continue
                     
-                    # Get current value
-                    current_value = self.get_cell_value(worksheet_name, sender_row, metric_col)
+                    date_col = self._find_or_create_date_column(worksheet, structure, week_end)
+                    if not date_col:
+                        continue
                     
-                    # Determine what value to write
-                    if heyreach_metric == 'acceptance_rate':
-                        value_to_write = f"{acceptance_rate:.2f}%"
-                    elif heyreach_metric == 'reply_rate':
-                        value_to_write = f"{reply_rate:.2f}%"
-                    else:
-                        value_to_write = str(aggregated[heyreach_metric])
+                    # Calculate rates for this week
+                    connections_sent = week_data.get('connections_sent', 0) or 0
+                    connections_accepted = week_data.get('connections_accepted', 0) or 0
+                    messages_sent = week_data.get('messages_sent', 0) or 0
+                    message_replies = week_data.get('message_replies', 0) or 0
                     
-                    # Only update if cell is empty or different
-                    if not current_value or current_value.strip() == '':
-                        try:
-                            self.update_cell(worksheet_name, sender_row, metric_col, value_to_write)
-                            results['updated'] += 1
-                            logger.info(f"Updated {sheet_sender_name} - {heyreach_metric}: {value_to_write}")
-                        except Exception as e:
-                            error_msg = f"Error updating {sheet_sender_name} - {heyreach_metric}: {e}"
-                            results['errors'].append(error_msg)
-                            logger.error(error_msg)
-                    else:
-                        logger.debug(f"Skipping {sheet_sender_name} - {heyreach_metric} (already has value: {current_value})")
+                    acceptance_rate = (connections_accepted / connections_sent * 100) if connections_sent > 0 else 0
+                    reply_rate = (message_replies / messages_sent * 100) if messages_sent > 0 else 0
+                    
+                    metric_values = {
+                        'connections_sent': int(connections_sent),
+                        'connections_accepted': int(connections_accepted),
+                        'acceptance_rate': f"{acceptance_rate:.2f}%",
+                        'messages_sent': int(messages_sent),
+                        'message_replies': int(message_replies),
+                        'reply_rate': f"{reply_rate:.2f}%",
+                        'open_conversations': int(week_data.get('open_conversations', 0) or 0),
+                        'interested': int(week_data.get('interested', 0) or 0),
+                        'leads_not_enrolled': int(week_data.get('leads_not_enrolled', 0) or 0)
+                    }
+                    
+                    # Write values into metric rows for this sender/week
+                    for heyreach_metric, value_to_write in metric_values.items():
+                        metric_row = metric_rows.get(heyreach_metric)
+                        if not metric_row:
+                            continue
+                        
+                        current_value = self.get_cell_value(worksheet_name, metric_row, date_col)
+                        
+                        # Only update if empty to avoid overwriting
+                        if not current_value or current_value.strip() == '':
+                            try:
+                                self.update_cell(worksheet_name, metric_row, date_col, str(value_to_write))
+                                results['updated'] += 1
+                                logger.info(f"Updated {sheet_sender_name} week {week_end} - {heyreach_metric}: {value_to_write}")
+                            except Exception as e:
+                                error_msg = f"Error updating {sheet_sender_name} week {week_end} - {heyreach_metric}: {e}"
+                                results['errors'].append(error_msg)
+                                logger.error(error_msg)
+                        else:
+                            logger.debug(f"Skipping {sheet_sender_name} week {week_end} - {heyreach_metric} (already has value: {current_value})")
             
             logger.info(f"Completed populating worksheet '{worksheet_name}': {results['updated']} cells updated")
             return results
