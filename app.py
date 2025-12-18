@@ -348,50 +348,80 @@ def initialize_api_key():
         session['client_groups'] = client_groups
         
         # Create a temporary client to test the connection and fetch senders
-        # Pass sender_names and client_groups for mapping, but force API fetch
+        # Pass sender_ids, sender_names and client_groups for mapping
         temp_client = HeyReachClient(
             api_key=api_key,
             base_url=session['heyreach_base_url'],
-            sender_ids=[],  # Empty list to force API fetch
+            sender_ids=sender_ids,  # Include manual sender IDs
             sender_names=sender_names,  # For mapping IDs to names
             client_groups=client_groups  # For client grouping
         )
         
-        # Test connection by fetching accounts from API
-        # force_api=True ensures we fetch from API, not use manual config
-        accounts = temp_client.get_linkedin_accounts(force_api=True)
+        # Fetch accounts from API first
+        api_accounts = temp_client.get_linkedin_accounts(force_api=True)
         
-        if not accounts:
-            logger.warning("No LinkedIn accounts returned from API")
+        # Also get manually configured senders (if any)
+        manual_senders = []
+        if sender_ids and len(sender_ids) > 0:
+            for sender_id in sender_ids:
+                sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
+                sender_name = (
+                    sender_names.get(sender_id_int) or 
+                    sender_names.get(sender_id) or 
+                    f'Sender {sender_id}'
+                )
+                manual_senders.append({
+                    'id': sender_id,
+                    'name': sender_name
+                })
+        
+        # Merge API accounts and manual senders, avoiding duplicates
+        sender_ids_seen = set()
+        senders = []
+        
+        # First add API accounts
+        if api_accounts:
+            for acc in api_accounts:
+                sender_id = acc.get('id')
+                if not sender_id:
+                    continue
+                
+                sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
+                sender_ids_seen.add(sender_id_int)
+                sender_ids_seen.add(sender_id)  # Also track original format
+                
+                # Try to get name from config.yaml first, then from API response
+                sender_name = (
+                    sender_names.get(sender_id_int) or 
+                    sender_names.get(sender_id) or 
+                    acc.get('linkedInUserListName') or 
+                    acc.get('name') or 
+                    f'Sender {sender_id}'
+                )
+                
+                senders.append({
+                    'id': sender_id,
+                    'name': sender_name
+                })
+        
+        # Then add manual senders that aren't already in the list
+        for manual_sender in manual_senders:
+            sender_id = manual_sender['id']
+            sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
+            
+            # Only add if not already present
+            if sender_id_int not in sender_ids_seen and sender_id not in sender_ids_seen:
+                senders.append(manual_sender)
+                sender_ids_seen.add(sender_id_int)
+                sender_ids_seen.add(sender_id)
+        
+        if not senders:
+            logger.warning("No LinkedIn accounts found from API or manual config")
             return jsonify({
                 'success': True,
                 'senders': [{'id': 'all', 'name': 'All'}],
                 'warning': 'No senders found. API key is valid but no accounts available.'
             }), 200
-        
-        # Map API sender IDs to names from config.yaml
-        senders = []
-        for acc in accounts:
-            sender_id = acc.get('id')
-            if not sender_id:
-                continue
-            
-            # Convert sender_id to int for lookup if needed (config.yaml uses int keys)
-            sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
-            
-            # Try to get name from config.yaml first (try both int and original format), then from API response
-            sender_name = (
-                sender_names.get(sender_id_int) or 
-                sender_names.get(sender_id) or 
-                acc.get('linkedInUserListName') or 
-                acc.get('name') or 
-                f'Sender {sender_id}'
-            )
-            
-            senders.append({
-                'id': sender_id,
-                'name': sender_name
-            })
         
         # Add "All" option
         senders.insert(0, {'id': 'all', 'name': 'All'})
@@ -434,41 +464,99 @@ def get_senders():
             temp_client = HeyReachClient(
                 api_key=api_key,
                 base_url=base_url,
-                sender_ids=[],  # Empty to force API fetch
+                sender_ids=sender_ids,  # Include manual sender IDs
                 sender_names=sender_names,
                 client_groups=client_groups
             )
-            accounts = temp_client.get_linkedin_accounts(force_api=True)
+            api_accounts = temp_client.get_linkedin_accounts(force_api=True)
+            
+            # Also get manually configured senders (if any)
+            manual_senders = []
+            if sender_ids and len(sender_ids) > 0:
+                for sender_id in sender_ids:
+                    sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
+                    sender_name = (
+                        sender_names.get(sender_id_int) or 
+                        sender_names.get(sender_id) or 
+                        f'Sender {sender_id}'
+                    )
+                    manual_senders.append({
+                        'id': sender_id,
+                        'name': sender_name
+                    })
+            
+            # Merge API accounts and manual senders, avoiding duplicates
+            sender_ids_seen = set()
+            senders = []
+            
+            # First add API accounts
+            if api_accounts:
+                for acc in api_accounts:
+                    sender_id = acc.get('id')
+                    if not sender_id:
+                        continue
+                    
+                    sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
+                    sender_ids_seen.add(sender_id_int)
+                    sender_ids_seen.add(sender_id)
+                    
+                    # Try to get name from config.yaml first, then from API response
+                    sender_name = (
+                        sender_names.get(sender_id_int) or 
+                        sender_names.get(sender_id) or 
+                        acc.get('linkedInUserListName') or 
+                        acc.get('name') or 
+                        f'Sender {sender_id}'
+                    )
+                    
+                    senders.append({
+                        'id': sender_id,
+                        'name': sender_name
+                    })
+            
+            # Then add manual senders that aren't already in the list
+            for manual_sender in manual_senders:
+                sender_id = manual_sender['id']
+                sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
+                
+                # Only add if not already present
+                if sender_id_int not in sender_ids_seen and sender_id not in sender_ids_seen:
+                    senders.append(manual_sender)
+                    sender_ids_seen.add(sender_id_int)
+                    sender_ids_seen.add(sender_id)
+            
+            accounts = senders  # For compatibility with rest of code
         
         if not accounts:
-            logger.warning("No LinkedIn accounts returned from API")
+            logger.warning("No LinkedIn accounts returned from API or manual config")
             return jsonify({'senders': [{'id': 'all', 'name': 'All'}], 'warning': 'No senders found'}), 200
         
-        # Map sender IDs to names from config.yaml
-        sender_names = session.get('sender_names', {})
-        
-        senders = []
-        for acc in accounts:
-            sender_id = acc.get('id')
-            if not sender_id:
-                continue
-            
-            # Convert sender_id to int for lookup if needed (config.yaml uses int keys)
-            sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
-            
-            # Try to get name from config.yaml first, then from API response
-            sender_name = (
-                sender_names.get(sender_id_int) or 
-                sender_names.get(sender_id) or 
-                acc.get('linkedInUserListName') or 
-                acc.get('name') or 
-                f'Sender {sender_id}'
-            )
-            
-            senders.append({
-                'id': sender_id,
-                'name': sender_name
-            })
+        # If accounts came from global client (fallback), map them
+        if isinstance(accounts, list) and len(accounts) > 0 and isinstance(accounts[0], dict) and 'id' in accounts[0]:
+            senders = accounts
+        else:
+            # Map sender IDs to names from config.yaml (fallback for global client)
+            sender_names = session.get('sender_names', {})
+            senders = []
+            for acc in accounts:
+                sender_id = acc.get('id')
+                if not sender_id:
+                    continue
+                
+                sender_id_int = int(sender_id) if sender_id and isinstance(sender_id, (str, float)) else sender_id
+                
+                sender_name = (
+                    sender_names.get(sender_id_int) or 
+                    sender_names.get(sender_id) or 
+                    acc.get('linkedInUserListName') or 
+                    acc.get('name') or 
+                    f'Sender {sender_id}'
+                )
+                
+                senders.append({
+                    'id': sender_id,
+                    'name': sender_name
+                })
         
         # Add "All" option
         senders.insert(0, {'id': 'all', 'name': 'All'})
