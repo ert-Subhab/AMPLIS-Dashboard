@@ -1010,7 +1010,7 @@ def send_to_apps_script():
             end_date=end_date
         )
         
-        if not performance_data or not performance_data.get('senders'):
+        if not performance_data:
             return jsonify({'error': 'No data available for the selected date range'}), 400
         
         # Get sender_names mapping from session; fallback to global client config
@@ -1066,6 +1066,41 @@ def send_to_apps_script():
             client_groups[client_name] = {
                 'sender_ids': sender_ids
             }
+        
+        # Get all available senders (even if they have no data in this range)
+        # This ensures we send all senders to Apps Script, not just ones with data
+        all_available_senders = {}
+        try:
+            # Get all senders from the client
+            all_accounts = client.get_linkedin_accounts()
+            for acc in all_accounts:
+                acc_id = acc.get('id')
+                acc_name = acc.get('linkedInUserListName') or acc.get('name') or f'Sender {acc_id}'
+                # Convert ID for lookup
+                acc_id_int = int(acc_id) if acc_id and isinstance(acc_id, (str, float)) else acc_id
+                # Use mapped name if available
+                mapped_name = sender_names.get(acc_id_int) or sender_names.get(acc_id) or acc_name
+                all_available_senders[mapped_name] = acc_id
+            logger.info(f"Found {len(all_accounts)} total senders from client")
+        except Exception as e:
+            logger.warning(f"Could not fetch all senders: {e}")
+            # Fallback: use senders from performance data only
+            all_available_senders = {name: None for name in performance_data.get('senders', {}).keys()}
+        
+        # Merge: include all senders, use performance data if available, otherwise empty weeks
+        senders_with_data = performance_data.get('senders', {})
+        logger.info(f"Found {len(senders_with_data)} senders with data, {len(all_available_senders)} total available senders")
+        
+        # If we have more available senders than senders with data, include the ones without data
+        if len(all_available_senders) > len(senders_with_data):
+            for sender_name, sender_id in all_available_senders.items():
+                if sender_name not in senders_with_data:
+                    # Add sender with empty weeks array
+                    senders_with_data[sender_name] = []
+                    logger.debug(f"Added sender '{sender_name}' with no data for date range")
+        
+        # Update performance_data to include all senders
+        performance_data['senders'] = senders_with_data
         
         # Format data for Apps Script with sender IDs and client groups
         formatted_data = {
@@ -1144,6 +1179,16 @@ def send_to_apps_script():
         if len(sender_names) > 0:
             first_key = list(sender_names.keys())[0]
             logger.info(f"Sample sender_names entry: {first_key} (type: {type(first_key).__name__}) -> {sender_names[first_key]}")
+        
+        # Log how many senders we have in performance data
+        senders_in_perf_data = performance_data.get('senders', {})
+        logger.info(f"Performance data contains {len(senders_in_perf_data)} senders")
+        if len(senders_in_perf_data) > 0:
+            logger.info(f"Sender names in performance data: {list(senders_in_perf_data.keys())[:10]}...")  # First 10
+        
+        # Also check if we have client groups data
+        clients_in_perf_data = performance_data.get('clients', {})
+        logger.info(f"Performance data contains {len(clients_in_perf_data)} clients")
         
         for sender_name, weeks_data in performance_data.get('senders', {}).items():
             # Find sender ID from mapping (reverse/fuzzy lookup: name -> ID)
