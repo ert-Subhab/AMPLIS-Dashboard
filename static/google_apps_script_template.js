@@ -299,10 +299,40 @@ function processSheetBatch(sheet, senders) {
       if (!weekDate) continue;
       
       const weekKey = formatWeekKey(weekDate);
-      const col = weekColumns[weekKey];
+      if (!weekKey) {
+        continue; // Couldn't format the date
+      }
       
-      if (!col) {
-        continue; // Week column doesn't exist (shouldn't happen after creation)
+      let col = weekColumns[weekKey];
+      
+      // If column doesn't exist, try to find it or create it
+      if (col === undefined || col === null) {
+        // Try normalized version
+        const parts = weekKey.split('/');
+        const normalized = parseInt(parts[0]) + '/' + parseInt(parts[1]);
+        col = weekColumns[normalized];
+        
+        // If still not found, create it at the end
+        if (col === undefined || col === null) {
+          const insertAfterCol = actualLastCol + 1;
+          sheet.insertColumnAfter(insertAfterCol);
+          actualLastCol++;
+          const newColIndex = actualLastCol + 1;
+          sheet.getRange(headerRowIndex + 1, newColIndex).setValue(weekKey);
+          col = actualLastCol;
+          weekColumns[weekKey] = col;
+          weekColumns[normalized] = col;
+          result.columns_created.push({ sheet: sheet.getName(), column: weekKey, position: newColIndex });
+          
+          // Refresh data after creating column
+          SpreadsheetApp.flush();
+          allValues = sheet.getDataRange().getValues();
+        }
+      }
+      
+      // Skip if column still not found (shouldn't happen, but safety check)
+      if (col === undefined || col === null) {
+        continue;
       }
       
       let weekHadUpdates = false;
@@ -328,11 +358,9 @@ function processSheetBatch(sheet, senders) {
         // Always write the value (update existing or write new)
         sheet.getRange(row, col + 1).setValue(value);
         
-        if (wasEmpty) {
-          cellsUpdated++;
-        } else {
-          cellsSkipped++; // Was filled, but we updated it anyway
-        }
+        // Count as updated regardless of whether it was empty or not
+        // (user wants to update even if column already exists)
+        cellsUpdated++;
         weekHadUpdates = true;
       }
       
@@ -343,30 +371,30 @@ function processSheetBatch(sheet, senders) {
     
     // Report based on what happened
     if (cellsUpdated > 0) {
+      // Successfully updated (we always update now, even if cells were filled)
       result.processed.push({ 
         sender: sender.name, 
         sheet: sheet.getName(), 
         row: senderRow,
         cells_updated: cellsUpdated,
-        cells_skipped: cellsSkipped,
         weeks_processed: weeksProcessed
       });
-    } else if (sender.weeks.length > 0) {
-      // Found sender but all cells were already filled
-      result.found_skipped.push({ 
-        sender: sender.name, 
-        sheet: sheet.getName(), 
-        row: senderRow,
-        reason: 'All cells already filled',
-        weeks_checked: sender.weeks.length
-      });
-    } else {
+    } else if (sender.weeks.length === 0) {
       // Found sender but no weeks data
       result.found_skipped.push({ 
         sender: sender.name, 
         sheet: sheet.getName(), 
         row: senderRow,
         reason: 'No week data provided'
+      });
+    } else {
+      // Found sender but no matching week columns (all week dates didn't match)
+      result.found_skipped.push({ 
+        sender: sender.name, 
+        sheet: sheet.getName(), 
+        row: senderRow,
+        reason: 'No matching week columns found',
+        weeks_checked: sender.weeks.length
       });
     }
   }
