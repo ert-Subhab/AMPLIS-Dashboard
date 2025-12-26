@@ -1265,18 +1265,40 @@ def send_to_apps_script():
             if response_data and isinstance(response_data, dict):
                 results = response_data.get('results', {})
                 processed = results.get('processed', [])
+                found_skipped = results.get('found_skipped', [])
                 not_found = results.get('not_found', [])
                 errors = results.get('errors', [])
                 debug = results.get('debug', {})
                 
-                message = f'Processed {len(processed)} senders, {len(not_found)} not found.'
-                
-                if processed:
-                    details['processed'] = [f"{p.get('sender')} → {p.get('sheet')} (row {p.get('row')}, {p.get('cells_updated')} cells)" for p in processed[:5]]
+                message = f'Processed {len(processed)} senders'
+                if found_skipped:
+                    message += f', {len(found_skipped)} found but skipped (already filled)'
                 if not_found:
-                    details['not_found'] = [f"{n.get('sender')}: {n.get('reason')}" for n in not_found[:10]]
+                    message += f', {len(not_found)} not found'
+                
+                # Successfully processed (found and updated)
+                if processed:
+                    details['processed'] = [
+                        f"✅ {p.get('sender')} → {p.get('sheet')} (row {p.get('row')}, {p.get('cells_updated', p.get('cells', 0))} cells updated)"
+                        for p in processed
+                    ]
+                
+                # Found but skipped (already filled)
+                if found_skipped:
+                    details['found_skipped'] = [
+                        f"⏭️ {s.get('sender')} → {s.get('sheet')} (row {s.get('row')}): {s.get('reason', 'Already filled')}"
+                        for s in found_skipped
+                    ]
+                
+                # Not found in sheet
+                if not_found:
+                    details['not_found'] = [
+                        f"❌ {n.get('sender')}: {n.get('reason', 'Not found in sheet')}"
+                        for n in not_found
+                    ]
+                
                 if errors:
-                    details['errors'] = [f"{e.get('sender')}: {e.get('error')}" for e in errors[:5]]
+                    details['errors'] = [f"⚠️ {e.get('sender', 'Unknown')}: {e.get('error', 'Error')}" for e in errors[:5]]
                 if debug:
                     details['sheets_found'] = debug.get('sheets_available', [])
                     details['client_groups_received'] = debug.get('client_groups', [])

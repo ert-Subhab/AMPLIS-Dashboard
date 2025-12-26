@@ -20,6 +20,7 @@ function doPost(e) {
     
     const results = {
       processed: [],
+      found_skipped: [],
       not_found: [],
       columns_created: [],
       errors: []
@@ -89,6 +90,9 @@ function doPost(e) {
       try {
         const batchResult = processSheetBatch(sheetData.sheet, sheetData.senders);
         results.processed.push(...batchResult.processed);
+        if (batchResult.found_skipped) {
+          results.found_skipped.push(...batchResult.found_skipped);
+        }
         results.not_found.push(...batchResult.not_found);
         results.columns_created.push(...batchResult.columns_created);
       } catch (err) {
@@ -96,9 +100,26 @@ function doPost(e) {
       }
     }
     
+    // Build detailed message
+    const processedCount = results.processed.length;
+    const skippedCount = (results.found_skipped || []).length;
+    const notFoundCount = results.not_found.length;
+    const columnsCount = results.columns_created.length;
+    
+    let message = `Processed ${processedCount} senders`;
+    if (skippedCount > 0) {
+      message += `, ${skippedCount} found but skipped (already filled)`;
+    }
+    if (notFoundCount > 0) {
+      message += `, ${notFoundCount} not found`;
+    }
+    if (columnsCount > 0) {
+      message += `, ${columnsCount} new columns created`;
+    }
+    
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
-      message: `Processed ${results.processed.length} senders, ${results.not_found.length} not found, ${results.columns_created.length} new columns created`,
+      message: message,
       results: results
     })).setMimeType(ContentService.MimeType.JSON);
     
@@ -115,7 +136,12 @@ function doPost(e) {
  * AUTO-CREATES new date columns if they don't exist
  */
 function processSheetBatch(sheet, senders) {
-  const result = { processed: [], not_found: [], columns_created: [] };
+  const result = { 
+    processed: [],      // Found and updated (cells written)
+    found_skipped: [],  // Found but all cells already filled
+    not_found: [],      // Not found in sheet
+    columns_created: [] 
+  };
   
   // Get all data from sheet at once
   const dataRange = sheet.getDataRange();
@@ -232,7 +258,10 @@ function processSheetBatch(sheet, senders) {
       continue;
     }
     
+    // Sender was found - track updates
     let cellsUpdated = 0;
+    let cellsSkipped = 0;
+    let weeksProcessed = 0;
     
     for (const week of sender.weeks) {
       const weekDate = week.week_end || week.week_start;
@@ -241,7 +270,11 @@ function processSheetBatch(sheet, senders) {
       const weekKey = formatWeekKey(weekDate);
       const col = weekColumns[weekKey];
       
-      if (!col) continue;
+      if (!col) {
+        continue; // Week column doesn't exist (shouldn't happen after creation)
+      }
+      
+      let weekHadUpdates = false;
       
       for (const metric of metrics) {
         const row = senderRow + metric.offset;
@@ -261,12 +294,44 @@ function processSheetBatch(sheet, senders) {
           
           sheet.getRange(row, col + 1).setValue(value);
           cellsUpdated++;
+          weekHadUpdates = true;
+        } else {
+          cellsSkipped++;
         }
+      }
+      
+      if (weekHadUpdates) {
+        weeksProcessed++;
       }
     }
     
+    // Report based on what happened
     if (cellsUpdated > 0) {
-      result.processed.push({ sender: sender.name, sheet: sheet.getName(), cells: cellsUpdated });
+      result.processed.push({ 
+        sender: sender.name, 
+        sheet: sheet.getName(), 
+        row: senderRow,
+        cells_updated: cellsUpdated,
+        cells_skipped: cellsSkipped,
+        weeks_processed: weeksProcessed
+      });
+    } else if (sender.weeks.length > 0) {
+      // Found sender but all cells were already filled
+      result.found_skipped.push({ 
+        sender: sender.name, 
+        sheet: sheet.getName(), 
+        row: senderRow,
+        reason: 'All cells already filled',
+        weeks_checked: sender.weeks.length
+      });
+    } else {
+      // Found sender but no weeks data
+      result.found_skipped.push({ 
+        sender: sender.name, 
+        sheet: sheet.getName(), 
+        row: senderRow,
+        reason: 'No week data provided'
+      });
     }
   }
   
@@ -280,6 +345,11 @@ function processSheetBatch(sheet, senders) {
 function findSenderRowInData(allValues, senderName) {
   const normalized = senderName.toLowerCase().trim();
   
+  // Split name into parts for better matching
+  const nameParts = normalized.split(/\s+/).filter(p => p.length > 0);
+  const firstName = nameParts[0] || '';
+  const lastName = nameParts[nameParts.length - 1] || '';
+  
   for (let row = 0; row < allValues.length; row++) {
     const cell = allValues[row][0];
     if (!cell) continue;
@@ -289,16 +359,47 @@ function findSenderRowInData(allValues, senderName) {
     // Skip metrics and dates
     if (isMetric(cellVal) || isDate(cellVal)) continue;
     
-    // Exact match
+    // Exact match (case-insensitive)
     if (cellVal === normalized) return row + 1;
     
-    // Partial match
-    if (cellVal.includes(normalized) || normalized.includes(cellVal)) return row + 1;
+    // Normalize both for comparison (remove extra spaces, punctuation)
+    const normalizedCell = cellVal.replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
+    const normalizedSender = normalized.replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
     
-    // First name match
-    const senderFirst = normalized.split(' ')[0];
-    const cellFirst = cellVal.split(' ')[0];
-    if (senderFirst.length >= 3 && cellFirst.length >= 3 && senderFirst === cellFirst) return row + 1;
+    if (normalizedCell === normalizedSender) return row + 1;
+    
+    // Partial match (one contains the other)
+    if (normalizedCell.includes(normalizedSender) || normalizedSender.includes(normalizedCell)) {
+      return row + 1;
+    }
+    
+    // First and last name match (handles middle names/initials)
+    const cellParts = normalizedCell.split(/\s+/).filter(p => p.length > 0);
+    if (cellParts.length >= 2 && nameParts.length >= 2) {
+      const cellFirst = cellParts[0];
+      const cellLast = cellParts[cellParts.length - 1];
+      
+      // Match if first and last names match (ignoring middle names/initials)
+      if (firstName && lastName && cellFirst === firstName && cellLast === lastName) {
+        return row + 1;
+      }
+      
+      // Match if first name matches and last name is similar (fuzzy)
+      if (firstName && cellFirst === firstName) {
+        // Check if last names are similar (one contains the other or vice versa)
+        if (cellLast.includes(lastName) || lastName.includes(cellLast)) {
+          return row + 1;
+        }
+      }
+    }
+    
+    // First name only match (if first name is substantial, >= 4 chars)
+    if (firstName.length >= 4) {
+      const cellFirst = cellParts[0] || '';
+      if (cellFirst === firstName && cellFirst.length >= 4) {
+        return row + 1;
+      }
+    }
   }
   
   return null;

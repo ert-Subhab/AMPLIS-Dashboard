@@ -868,19 +868,23 @@ async function sendToAppsScript() {
         if (data.details) {
             const details = data.details;
             
+            // Successfully processed (found and updated)
             if (details.processed && details.processed.length > 0) {
-                message += '\n\n✅ Processed:\n' + details.processed.join('\n');
+                message += '\n\n✅ Successfully Updated (' + details.processed.length + '):\n' + details.processed.join('\n');
             }
             
+            // Found but skipped (already filled)
+            if (details.found_skipped && details.found_skipped.length > 0) {
+                message += '\n\n⏭️ Found But Skipped (' + details.found_skipped.length + ' - already filled):\n' + details.found_skipped.join('\n');
+            }
+            
+            // Not found in sheet
             if (details.not_found && details.not_found.length > 0) {
-                message += '\n\n⚠️ Not Found:\n' + details.not_found.slice(0, 5).join('\n');
-                if (details.not_found.length > 5) {
-                    message += `\n... and ${details.not_found.length - 5} more`;
-                }
+                message += '\n\n❌ Not Found in Sheet (' + details.not_found.length + '):\n' + details.not_found.join('\n');
             }
             
             if (details.errors && details.errors.length > 0) {
-                message += '\n\n❌ Errors:\n' + details.errors.join('\n');
+                message += '\n\n⚠️ Errors:\n' + details.errors.join('\n');
             }
             
             // Show sheets found
