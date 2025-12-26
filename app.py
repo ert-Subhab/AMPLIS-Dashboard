@@ -998,10 +998,23 @@ def send_to_apps_script():
         sender_names_raw = session.get('sender_names', {})
         client_groups_raw = session.get('client_groups', {})
         
-        if (not sender_names_raw or len(sender_names_raw) == 0) and heyreach_client:
-            sender_names_raw = getattr(heyreach_client, 'manual_sender_names', {}) or {}
-            client_groups_raw = getattr(heyreach_client, 'client_groups', {}) or {}
-            logger.info(f"Falling back to global client mappings: sender_names={len(sender_names_raw)}, client_groups={len(client_groups_raw)}")
+        # Fallback to global client if session is empty
+        if (not sender_names_raw or len(sender_names_raw) == 0):
+            try:
+                if heyreach_client:
+                    sender_names_raw = getattr(heyreach_client, 'manual_sender_names', {}) or {}
+                    client_groups_raw = getattr(heyreach_client, 'client_groups', {}) or {}
+                    logger.info(f"Falling back to global client mappings: sender_names={len(sender_names_raw)}, client_groups={len(client_groups_raw)}")
+                else:
+                    # Try to get from config directly
+                    config = load_config()
+                    if config and 'heyreach' in config:
+                        sender_names_raw = config['heyreach'].get('sender_names', {}) or {}
+                        client_groups_raw = config['heyreach'].get('client_groups', {}) or {}
+                        logger.info(f"Falling back to config mappings: sender_names={len(sender_names_raw)}, client_groups={len(client_groups_raw)}")
+            except Exception as fallback_error:
+                logger.warning(f"Error in fallback mapping: {fallback_error}")
+                # Continue with empty mappings
         
         # CRITICAL: Flask session serializes to JSON, converting int keys to strings
         # Convert string keys back to integers for proper lookup
@@ -1152,8 +1165,24 @@ def send_to_apps_script():
             response = requests.post(
                 apps_script_url,
                 json=formatted_data,
-                timeout=300  # 5 minutes for large datasets
+                timeout=300,  # 5 minutes for large datasets
+                allow_redirects=True
             )
+            
+            # Check for specific error codes
+            if response.status_code == 401:
+                logger.error(f"Apps Script returned 401 Unauthorized. URL: {apps_script_url}")
+                return jsonify({
+                    'error': 'Apps Script returned 401 Unauthorized. Please check:',
+                    'hints': [
+                        '1. Make sure your Apps Script web app is deployed (Deploy > New deployment)',
+                        '2. Set "Execute as: Me" and "Who has access: Anyone"',
+                        '3. Copy the new web app URL after deployment',
+                        '4. The URL should end with /exec (not /dev)'
+                    ],
+                    'url_provided': apps_script_url[:100] + '...' if len(apps_script_url) > 100 else apps_script_url
+                }), 401
+            
             response.raise_for_status()
             
             # Parse response to get detailed results
@@ -1201,10 +1230,29 @@ def send_to_apps_script():
             }), 500
         
     except Exception as e:
-        logger.error(f"Error sending to Apps Script: {e}")
+        error_msg = str(e)
+        logger.error(f"Error sending to Apps Script: {error_msg}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': f'Failed to send data: {str(e)}'}), 500
+        
+        # Provide more helpful error messages
+        if '401' in error_msg or 'Unauthorized' in error_msg:
+            return jsonify({
+                'error': 'Apps Script authentication failed',
+                'hint': 'Please redeploy your Apps Script web app and ensure it\'s set to "Anyone" access',
+                'details': error_msg
+            }), 401
+        elif '404' in error_msg or 'Not Found' in error_msg:
+            return jsonify({
+                'error': 'Apps Script URL not found',
+                'hint': 'Please check your Apps Script web app URL and ensure it\'s correctly deployed',
+                'details': error_msg
+            }), 404
+        
+        return jsonify({
+            'error': f'Failed to send data: {error_msg}',
+            'hint': 'Check server logs for details'
+        }), 500
 
 
 @app.route('/api/populate-sheets', methods=['POST'])
