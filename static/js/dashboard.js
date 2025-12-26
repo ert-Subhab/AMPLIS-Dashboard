@@ -833,10 +833,29 @@ async function sendToAppsScript() {
             })
         });
         
-        const data = await response.json();
+        let data;
+        try {
+            data = await response.json();
+        } catch (e) {
+            throw new Error('Failed to parse server response. Status: ' + response.status);
+        }
         
-        if (!response.ok || data.error) {
-            throw new Error(data.error || 'Failed to send data to Apps Script');
+        // Check for error in response (even if status is 200, we might return error messages)
+        if (data.error) {
+            let errorMsg = data.error;
+            if (data.hints && Array.isArray(data.hints)) {
+                errorMsg += '\n\n' + data.hints.join('\n');
+            } else if (data.hint) {
+                errorMsg += '\n\n' + data.hint;
+            }
+            if (data.instructions && Array.isArray(data.instructions)) {
+                errorMsg += '\n\n' + data.instructions.join('\n');
+            }
+            throw new Error(errorMsg);
+        }
+        
+        if (!response.ok && !data.error) {
+            throw new Error('Server returned error: ' + response.status + ' ' + response.statusText);
         }
         
         // Build detailed message

@@ -966,6 +966,25 @@ def send_to_apps_script():
         if not apps_script_url.startswith('https://script.google.com'):
             return jsonify({'error': 'Invalid Apps Script URL. Must start with https://script.google.com'}), 400
         
+        # Check if URL is a library URL (wrong type) vs web app URL
+        if '/library/d/' in apps_script_url:
+            return jsonify({
+                'error': 'Invalid Apps Script URL format',
+                'hint': 'You provided a library URL. You need a Web App URL instead.',
+                'instructions': [
+                    '1. In Apps Script, go to Deploy > New deployment',
+                    '2. Select type: "Web app" (not "Library")',
+                    '3. Set "Execute as: Me" and "Who has access: Anyone"',
+                    '4. Copy the Web App URL (should start with https://script.google.com/macros/s/...)',
+                    '5. The URL should NOT contain /library/d/'
+                ],
+                'url_provided': apps_script_url[:100] + '...' if len(apps_script_url) > 100 else apps_script_url
+            }), 400
+        
+        # Warn if URL doesn't look like a web app URL
+        if '/macros/s/' not in apps_script_url and '/exec' not in apps_script_url:
+            logger.warning(f"Apps Script URL might be incorrect format: {apps_script_url[:100]}")
+        
         # Get client from session or global
         client = get_client_for_request()
         
@@ -1178,10 +1197,11 @@ def send_to_apps_script():
                         '1. Make sure your Apps Script web app is deployed (Deploy > New deployment)',
                         '2. Set "Execute as: Me" and "Who has access: Anyone"',
                         '3. Copy the new web app URL after deployment',
-                        '4. The URL should end with /exec (not /dev)'
+                        '4. The URL should be a Web App URL (https://script.google.com/macros/s/...)',
+                        '5. The URL should NOT be a library URL (/library/d/...)'
                     ],
                     'url_provided': apps_script_url[:100] + '...' if len(apps_script_url) > 100 else apps_script_url
-                }), 401
+                }), 200  # Return 200 so frontend can display the error message
             
             response.raise_for_status()
             
@@ -1239,9 +1259,9 @@ def send_to_apps_script():
         if '401' in error_msg or 'Unauthorized' in error_msg:
             return jsonify({
                 'error': 'Apps Script authentication failed',
-                'hint': 'Please redeploy your Apps Script web app and ensure it\'s set to "Anyone" access',
+                'hint': 'Please redeploy your Apps Script web app and ensure it\'s set to "Anyone" access. Make sure you\'re using a Web App URL, not a library URL.',
                 'details': error_msg
-            }), 401
+            }), 200  # Return 200 so frontend can display the error message
         elif '404' in error_msg or 'Not Found' in error_msg:
             return jsonify({
                 'error': 'Apps Script URL not found',
