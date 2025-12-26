@@ -193,9 +193,14 @@ function processSheetBatch(sheet, senders) {
     }
   }
   
-  // If no week columns found, start after column A
-  if (lastWeekCol === 0) {
-    lastWeekCol = 0; // Will become 1 when we add first column
+  // Find the actual last column in the sheet (not just week columns)
+  // This ensures we append new columns at the end, not at the start
+  let actualLastCol = numCols - 1; // 0-indexed, so numCols - 1 is the last column index
+  
+  // If we found week columns, use the last week column position
+  // Otherwise, we'll append after the last column in the sheet
+  if (lastWeekCol > 0) {
+    actualLastCol = lastWeekCol; // Use last week column as insertion point
   }
   
   // Collect all unique week dates from all senders
@@ -218,23 +223,49 @@ function processSheetBatch(sheet, senders) {
     return aDay - bDay;
   });
   
+  // Track columns we need to create
+  const columnsToCreate = [];
   for (const weekKey of sortedWeekDates) {
     if (!weekColumns[weekKey]) {
-      // Need to create this column
-      // Insert a new column after the current last week column
-      sheet.insertColumnAfter(lastWeekCol + 1);
-      lastWeekCol++;
-      sheet.getRange(headerRowIndex + 1, lastWeekCol + 1).setValue(weekKey);
-      weekColumns[weekKey] = lastWeekCol;
-      result.columns_created.push({ sheet: sheet.getName(), column: weekKey, position: lastWeekCol + 1 });
+      columnsToCreate.push(weekKey);
     }
   }
   
-  // Refresh data if we added columns
+  // Create all missing columns at the end
+  for (const weekKey of columnsToCreate) {
+    // Insert a new column at the END (after the last column in the sheet)
+    // actualLastCol is 0-indexed, insertColumnAfter needs 1-indexed
+    const insertAfterCol = actualLastCol + 1;
+    sheet.insertColumnAfter(insertAfterCol);
+    actualLastCol++; // New column is now at actualLastCol (0-indexed)
+    const newColIndex = actualLastCol + 1; // 1-indexed for setValue
+    sheet.getRange(headerRowIndex + 1, newColIndex).setValue(weekKey);
+    weekColumns[weekKey] = actualLastCol; // Store as 0-indexed for array access
+    result.columns_created.push({ sheet: sheet.getName(), column: weekKey, position: newColIndex });
+  }
+  
+  // Refresh data if we added columns and rebuild weekColumns map
   if (result.columns_created.length > 0) {
     SpreadsheetApp.flush();
     allValues = sheet.getDataRange().getValues();
     numCols = allValues[0] ? allValues[0].length : 0;
+    headerRow = allValues[headerRowIndex];
+    
+    // Rebuild weekColumns map with updated column positions
+    weekColumns = {};
+    for (let col = 1; col < numCols; col++) {
+      const headerVal = headerRow[col];
+      if (headerVal) {
+        const headerStr = String(headerVal).trim();
+        if (/^\d{1,2}\/\d{1,2}$/.test(headerStr)) {
+          weekColumns[headerStr] = col;
+          // Also store normalized version
+          const parts = headerStr.split('/');
+          const normalized = parseInt(parts[0]) + '/' + parseInt(parts[1]);
+          weekColumns[normalized] = col;
+        }
+      }
+    }
   }
   
   // Metrics offsets from sender row
@@ -279,25 +310,30 @@ function processSheetBatch(sheet, senders) {
       for (const metric of metrics) {
         const row = senderRow + metric.offset;
         
-        // Check if cell is empty
+        // Always update the cell (user wants to update even if column already exists)
+        // Check current value for reporting purposes
         const currentVal = (row - 1 < allValues.length && col < allValues[row - 1].length) 
           ? allValues[row - 1][col] 
           : '';
         
-        if (currentVal === '' || currentVal === null || currentVal === undefined) {
-          let value = week[metric.key];
-          if (value === undefined || value === null) value = 0;
-          
-          if (metric.isPercent) {
-            value = (typeof value === 'number') ? value.toFixed(2) + '%' : String(value) + '%';
-          }
-          
-          sheet.getRange(row, col + 1).setValue(value);
-          cellsUpdated++;
-          weekHadUpdates = true;
-        } else {
-          cellsSkipped++;
+        const wasEmpty = (currentVal === '' || currentVal === null || currentVal === undefined);
+        
+        let value = week[metric.key];
+        if (value === undefined || value === null) value = 0;
+        
+        if (metric.isPercent) {
+          value = (typeof value === 'number') ? value.toFixed(2) + '%' : String(value) + '%';
         }
+        
+        // Always write the value (update existing or write new)
+        sheet.getRange(row, col + 1).setValue(value);
+        
+        if (wasEmpty) {
+          cellsUpdated++;
+        } else {
+          cellsSkipped++; // Was filled, but we updated it anyway
+        }
+        weekHadUpdates = true;
       }
       
       if (weekHadUpdates) {
