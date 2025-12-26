@@ -174,7 +174,7 @@ function processSheetBatch(sheet, senders) {
   let headerRow = allValues[headerRowIndex];
   
   // Build week column map and find last week column
-  const weekColumns = {};
+  let weekColumns = {};
   let lastWeekCol = 0;
   
   for (let col = 1; col < numCols; col++) {
