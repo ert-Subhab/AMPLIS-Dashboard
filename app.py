@@ -1087,23 +1087,48 @@ def send_to_apps_script():
             # Fallback: use senders from performance data only
             all_available_senders = {name: None for name in performance_data.get('senders', {}).keys()}
         
-        # Only include senders that have actual data (non-empty weeks)
-        # Don't include senders with no data - they shouldn't be reported at all
+        # Merge: include all senders found in HeyReach API, use performance data if available
+        # Only exclude senders that weren't found in the API at all
         senders_with_data = performance_data.get('senders', {})
+        logger.info(f"Found {len(senders_with_data)} senders with data, {len(all_available_senders)} total available senders from API")
         
-        # Filter out senders with empty weeks arrays
-        filtered_senders = {}
+        # Build final sender list: only include senders found in HeyReach API
+        # Include senders with data, and senders without data (empty weeks) if they're in the API
+        final_senders = {}
+        senders_not_in_api = []
+        
+        # First, add all senders that have data (they're definitely in the API)
         for sender_name, weeks_data in senders_with_data.items():
-            # Only include if there's actual week data
-            if weeks_data and len(weeks_data) > 0:
-                filtered_senders[sender_name] = weeks_data
+            # Check if this sender is in the API (by name matching)
+            if sender_name in all_available_senders:
+                final_senders[sender_name] = weeks_data
             else:
-                logger.debug(f"Excluding sender '{sender_name}' - no data for date range")
+                # Try fuzzy matching to see if it's the same sender
+                found_match = False
+                for api_name, api_id in all_available_senders.items():
+                    # Normalize names for comparison
+                    if sender_name.lower().strip() == api_name.lower().strip():
+                        final_senders[api_name] = weeks_data  # Use API name
+                        found_match = True
+                        break
+                
+                if not found_match:
+                    senders_not_in_api.append(sender_name)
+                    logger.debug(f"Sender '{sender_name}' has data but not found in API - excluding")
         
-        logger.info(f"Found {len(filtered_senders)} senders with data (excluded {len(senders_with_data) - len(filtered_senders)} senders with no data)")
+        # Then, add senders from API that don't have data (empty weeks array)
+        for api_name, api_id in all_available_senders.items():
+            if api_name not in final_senders:
+                # Sender is in API but has no data for this date range - include with empty weeks
+                final_senders[api_name] = []
+                logger.debug(f"Adding sender '{api_name}' from API with no data (empty weeks)")
         
-        # Update performance_data to only include senders with data
-        performance_data['senders'] = filtered_senders
+        logger.info(f"Final senders: {len(final_senders)} (excluded {len(senders_not_in_api)} senders not found in API)")
+        if senders_not_in_api:
+            logger.info(f"Senders not in API (excluded): {senders_not_in_api}")
+        
+        # Update performance_data to include all senders found in API
+        performance_data['senders'] = final_senders
         
         # Format data for Apps Script with sender IDs and client groups
         formatted_data = {
@@ -1193,11 +1218,12 @@ def send_to_apps_script():
         clients_in_perf_data = performance_data.get('clients', {})
         logger.info(f"Performance data contains {len(clients_in_perf_data)} clients")
         
+        # Track processed senders to prevent duplicates when multiple APIs are used
+        processed_sender_ids = set()
+        
         for sender_name, weeks_data in performance_data.get('senders', {}).items():
-            # Skip senders with no data (empty weeks array)
-            if not weeks_data or len(weeks_data) == 0:
-                logger.debug(f"Skipping sender '{sender_name}' - no weeks data")
-                continue
+            # Include senders even if they have no data (empty weeks array)
+            # They're still in the API, just no data for this date range
             
             # Find sender ID from mapping (reverse/fuzzy lookup: name -> ID)
             sender_id, resolved_name = find_sender_id(sender_name)
@@ -1216,10 +1242,18 @@ def send_to_apps_script():
                 except ValueError:
                     pass
             
+            # Prevent duplicate processing: skip if we've already processed this sender ID
+            if sender_id is not None:
+                sender_id_key = int(sender_id) if isinstance(sender_id, (str, float)) else sender_id
+                if sender_id_key in processed_sender_ids:
+                    logger.debug(f"Skipping duplicate sender '{sender_name}' (ID: {sender_id_key}) - already processed")
+                    continue
+                processed_sender_ids.add(sender_id_key)
+            
             sender_data = {
                 'name': sender_name,
                 'sender_id': sender_id,
-                'weeks': weeks_data
+                'weeks': weeks_data  # Can be empty array if no data for date range
             }
             formatted_data['senders'].append(sender_data)
         
