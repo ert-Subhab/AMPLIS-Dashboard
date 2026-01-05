@@ -1087,20 +1087,23 @@ def send_to_apps_script():
             # Fallback: use senders from performance data only
             all_available_senders = {name: None for name in performance_data.get('senders', {}).keys()}
         
-        # Merge: include all senders, use performance data if available, otherwise empty weeks
+        # Only include senders that have actual data (non-empty weeks)
+        # Don't include senders with no data - they shouldn't be reported at all
         senders_with_data = performance_data.get('senders', {})
-        logger.info(f"Found {len(senders_with_data)} senders with data, {len(all_available_senders)} total available senders")
         
-        # If we have more available senders than senders with data, include the ones without data
-        if len(all_available_senders) > len(senders_with_data):
-            for sender_name, sender_id in all_available_senders.items():
-                if sender_name not in senders_with_data:
-                    # Add sender with empty weeks array
-                    senders_with_data[sender_name] = []
-                    logger.debug(f"Added sender '{sender_name}' with no data for date range")
+        # Filter out senders with empty weeks arrays
+        filtered_senders = {}
+        for sender_name, weeks_data in senders_with_data.items():
+            # Only include if there's actual week data
+            if weeks_data and len(weeks_data) > 0:
+                filtered_senders[sender_name] = weeks_data
+            else:
+                logger.debug(f"Excluding sender '{sender_name}' - no data for date range")
         
-        # Update performance_data to include all senders
-        performance_data['senders'] = senders_with_data
+        logger.info(f"Found {len(filtered_senders)} senders with data (excluded {len(senders_with_data) - len(filtered_senders)} senders with no data)")
+        
+        # Update performance_data to only include senders with data
+        performance_data['senders'] = filtered_senders
         
         # Format data for Apps Script with sender IDs and client groups
         formatted_data = {
@@ -1191,6 +1194,11 @@ def send_to_apps_script():
         logger.info(f"Performance data contains {len(clients_in_perf_data)} clients")
         
         for sender_name, weeks_data in performance_data.get('senders', {}).items():
+            # Skip senders with no data (empty weeks array)
+            if not weeks_data or len(weeks_data) == 0:
+                logger.debug(f"Skipping sender '{sender_name}' - no weeks data")
+                continue
+            
             # Find sender ID from mapping (reverse/fuzzy lookup: name -> ID)
             sender_id, resolved_name = find_sender_id(sender_name)
             if resolved_name:

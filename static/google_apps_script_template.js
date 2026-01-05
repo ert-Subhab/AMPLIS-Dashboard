@@ -241,6 +241,10 @@ function processSheetBatch(sheet, senders) {
     const newColIndex = actualLastCol + 1; // 1-indexed for setValue
     sheet.getRange(headerRowIndex + 1, newColIndex).setValue(weekKey);
     weekColumns[weekKey] = actualLastCol; // Store as 0-indexed for array access
+    // Also store normalized version
+    const parts = weekKey.split('/');
+    const normalized = parseInt(parts[0]) + '/' + parseInt(parts[1]);
+    weekColumns[normalized] = actualLastCol;
     result.columns_created.push({ sheet: sheet.getName(), column: weekKey, position: newColIndex });
   }
   
@@ -266,6 +270,9 @@ function processSheetBatch(sheet, senders) {
         }
       }
     }
+    
+    // Update actualLastCol to reflect the new last column position
+    actualLastCol = numCols - 1; // 0-indexed, so numCols - 1 is the last column
   }
   
   // Metrics offsets from sender row
@@ -303,35 +310,20 @@ function processSheetBatch(sheet, senders) {
         continue; // Couldn't format the date
       }
       
+      // Try to find column - check both exact and normalized versions
       let col = weekColumns[weekKey];
       
-      // If column doesn't exist, try to find it or create it
       if (col === undefined || col === null) {
         // Try normalized version
         const parts = weekKey.split('/');
         const normalized = parseInt(parts[0]) + '/' + parseInt(parts[1]);
         col = weekColumns[normalized];
-        
-        // If still not found, create it at the end
-        if (col === undefined || col === null) {
-          const insertAfterCol = actualLastCol + 1;
-          sheet.insertColumnAfter(insertAfterCol);
-          actualLastCol++;
-          const newColIndex = actualLastCol + 1;
-          sheet.getRange(headerRowIndex + 1, newColIndex).setValue(weekKey);
-          col = actualLastCol;
-          weekColumns[weekKey] = col;
-          weekColumns[normalized] = col;
-          result.columns_created.push({ sheet: sheet.getName(), column: weekKey, position: newColIndex });
-          
-          // Refresh data after creating column
-          SpreadsheetApp.flush();
-          allValues = sheet.getDataRange().getValues();
-        }
       }
       
-      // Skip if column still not found (shouldn't happen, but safety check)
+      // Skip if column still not found (shouldn't happen since we created all columns upfront, but safety check)
       if (col === undefined || col === null) {
+        // Log warning but don't create duplicate column
+        Logger.log(`Warning: Column for week ${weekKey} not found in weekColumns map. Skipping.`);
         continue;
       }
       
