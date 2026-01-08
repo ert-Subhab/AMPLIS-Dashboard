@@ -820,10 +820,6 @@ async function sendToAppsScript() {
             return;
         }
         
-        // Get selected update mode
-        const updateMode = document.querySelector('input[name="updateMode"]:checked')?.value || 'update_columns';
-        console.log('Sending to Apps Script with update_mode:', updateMode);
-        
         const response = await fetch('/api/send-to-apps-script', {
             method: 'POST',
             headers: {
@@ -833,8 +829,7 @@ async function sendToAppsScript() {
                 apps_script_url: appsScriptUrl,
                 sender_id: senderId,
                 start_date: startDate,
-                end_date: endDate,
-                update_mode: updateMode
+                end_date: endDate
             })
         });
         

@@ -995,7 +995,6 @@ def send_to_apps_script():
         sender_id = data.get('sender_id', 'all')
         start_date = data.get('start_date')
         end_date = data.get('end_date')
-        update_mode = data.get('update_mode', 'update_columns')  # Default to update_columns
         
         # If no dates provided, default to last 7 days
         if not start_date or not end_date:
@@ -1139,8 +1138,7 @@ def send_to_apps_script():
             },
             'senders': [],
             'sender_id_mapping': {},  # Map sender names to IDs for matching
-            'client_groups': client_groups,  # Include client groups for sheet matching
-            'update_mode': update_mode  # 'update_columns' or 'create_rows'
+            'client_groups': client_groups  # Include client groups for sheet matching
         }
         
         # Build reverse mapping: name -> ID (for Apps Script to look up by name)

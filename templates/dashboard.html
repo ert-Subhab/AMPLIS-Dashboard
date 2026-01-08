@@ -172,22 +172,7 @@
                         <p>Send data directly to your Google Sheet using Apps Script. No OAuth needed!</p>
                         <div class="apps-script-input-group" style="display: none;" id="appsScriptInputGroup">
                             <input type="text" id="appsScriptUrlInput" class="filter-input" placeholder="https://script.google.com/..." style="width: 100%; margin-bottom: 10px;">
-                            
-                            <!-- Update Mode Selection -->
-                            <div class="filter-group" style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">Data Update Mode:</label>
-                                <div style="display: flex; flex-direction: column; gap: 8px;">
-                                    <label style="display: flex; align-items: center; cursor: pointer;">
-                                        <input type="radio" name="updateMode" value="update_columns" id="updateColumnsRadio" checked style="margin-right: 8px;">
-                                        <span><strong>Update Existing Columns</strong> - Updates data in existing week columns</span>
-                                    </label>
-                                    <label style="display: flex; align-items: center; cursor: pointer;">
-                                        <input type="radio" name="updateMode" value="create_rows" id="createRowsRadio" style="margin-right: 8px;">
-                                        <span><strong>Create New Rows</strong> - Always creates new rows at the end of the sheet</span>
-                                    </label>
-                                </div>
-                                <small style="color: #666; margin-top: 5px; display: block;">Choose how you want to add data to your sheet.</small>
-                            </div>
+                            <small style="color: #666; margin-bottom: 10px; display: block;">Updates existing columns and creates new week columns if they don't exist. Never creates new rows.</small>
                             
                             <button id="sendToAppsScriptBtn" class="btn btn-export">
                                 <span class="btn-icon">🚀</span>

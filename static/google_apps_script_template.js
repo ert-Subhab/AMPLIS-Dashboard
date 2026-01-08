@@ -86,24 +86,18 @@ function doPost(e) {
       sendersBySheet[sheetName].senders.push({ name: senderName, id: senderId, weeks: weeks });
     }
     
-    // Get update mode from data (default to 'update_columns')
-    // IMPORTANT: Only use 'create_rows' if explicitly set, otherwise always use 'update_columns'
-    const updateMode = (data.update_mode === 'create_rows') ? 'create_rows' : 'update_columns';
-    Logger.log(`Update mode received: ${data.update_mode}, using: ${updateMode}`);
-    
     // Process each sheet with batch updates
+    // NOTE: Only updates existing columns and creates new columns if needed
+    // Never creates new rows
     for (const [sheetName, sheetData] of Object.entries(sendersBySheet)) {
       try {
-        const batchResult = processSheetBatch(sheetData.sheet, sheetData.senders, updateMode);
+        const batchResult = processSheetBatch(sheetData.sheet, sheetData.senders);
         results.processed.push(...batchResult.processed);
         if (batchResult.found_skipped) {
           results.found_skipped.push(...batchResult.found_skipped);
         }
         results.not_found.push(...batchResult.not_found);
         results.columns_created.push(...batchResult.columns_created);
-        if (batchResult.rows_created) {
-          results.rows_created = (results.rows_created || 0) + batchResult.rows_created;
-        }
       } catch (err) {
         results.errors.push({ sheet: sheetName, error: err.toString() });
       }
@@ -114,7 +108,6 @@ function doPost(e) {
     const skippedCount = (results.found_skipped || []).length;
     const notFoundCount = results.not_found.length;
     const columnsCount = results.columns_created.length;
-    const rowsCount = results.rows_created || 0;
     
     let message = `Processed ${processedCount} senders`;
     if (skippedCount > 0) {
@@ -125,9 +118,6 @@ function doPost(e) {
     }
     if (columnsCount > 0) {
       message += `, ${columnsCount} new columns created`;
-    }
-    if (rowsCount > 0) {
-      message += `, ${rowsCount} new rows created`;
     }
     
     return ContentService.createTextOutput(JSON.stringify({
@@ -146,28 +136,16 @@ function doPost(e) {
 
 /**
  * Process all senders for a sheet using batch updates
- * AUTO-CREATES new date columns if they don't exist (update_columns mode)
- * OR creates new rows at the end (create_rows mode)
+ * AUTO-CREATES new date columns if they don't exist
+ * NEVER creates new rows - only updates existing cells
  */
-function processSheetBatch(sheet, senders, updateMode = 'update_columns') {
+function processSheetBatch(sheet, senders) {
   const result = { 
     processed: [],      // Found and updated (cells written)
     found_skipped: [],  // Found but all cells already filled
     not_found: [],      // Not found in sheet
-    columns_created: [],
-    rows_created: 0
+    columns_created: []
   };
-  
-  // If create_rows mode, use different processing logic
-  // IMPORTANT: Only create rows if explicitly set to 'create_rows'
-  // Default to 'update_columns' to prevent accidental row creation
-  if (updateMode === 'create_rows') {
-    Logger.log(`Using create_rows mode for sheet: ${sheet.getName()}`);
-    return processSheetCreateRows(sheet, senders);
-  }
-  
-  // Default mode: update_columns - NEVER create rows, only update existing cells
-  Logger.log(`Using update_columns mode for sheet: ${sheet.getName()}`);
   
   // Get all data from sheet at once
   const dataRange = sheet.getDataRange();
@@ -614,119 +592,6 @@ function formatWeekKey(dateStr) {
     }
   }
   return null;
-}
-
-/**
- * Process sheet by creating new rows at the end (create_rows mode)
- * Each sender-week combination becomes a new row
- */
-function processSheetCreateRows(sheet, senders) {
-  // SAFETY CHECK: This function should ONLY be called when explicitly in create_rows mode
-  Logger.log(`processSheetCreateRows called for sheet: ${sheet.getName()}, senders: ${senders.length}`);
-  
-  const result = { 
-    processed: [],
-    found_skipped: [],
-    not_found: [],
-    columns_created: [],
-    rows_created: 0
-  };
-  
-  // Get current data to find last row
-  const dataRange = sheet.getDataRange();
-  let allValues = dataRange.getValues();
-  let numRows = allValues.length;
-  let numCols = allValues[0] ? allValues[0].length : 0;
-  
-  // Find the last row with data (or start at row 1 if empty)
-  let lastRow = numRows;
-  
-  // IMPORTANT: Only create rows in columns A-J (the new row format)
-  // Do NOT touch existing sender rows or week columns
-  
-  // Define column structure for new rows
-  // Column A: Sender Name
-  // Column B: Week End Date
-  // Column C: Connections Sent
-  // Column D: Connections Accepted
-  // Column E: Acceptance Rate
-  // Column F: Messages Sent
-  // Column G: Message Replies
-  // Column H: Reply Rate
-  // Column I: Open Conversations
-  // Column J: Interested
-  
-  // Create header row if sheet is empty or doesn't have headers
-  if (numRows === 0 || numCols === 0) {
-    const headers = [
-      'Sender Name',
-      'Week End Date',
-      'Connections Sent',
-      'Connections Accepted',
-      'Acceptance Rate',
-      'Messages Sent',
-      'Message Replies',
-      'Reply Rate',
-      'Open Conversations',
-      'Interested'
-    ];
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    lastRow = 1;
-    numCols = headers.length;
-  }
-  
-  // Process each sender
-  for (const sender of senders) {
-    if (!sender.weeks || sender.weeks.length === 0) {
-      result.found_skipped.push({
-        sender: sender.name,
-        sheet: sheet.getName(),
-        reason: 'No week data provided'
-      });
-      continue;
-    }
-    
-    // Process each week for this sender
-    for (const week of sender.weeks) {
-      const weekDate = week.week_end || week.week_start;
-      if (!weekDate) continue;
-      
-      const weekKey = formatWeekKey(weekDate);
-      if (!weekKey) continue;
-      
-      // Increment row counter
-      lastRow++;
-      result.rows_created++;
-      
-      // Build row data
-      const rowData = [
-        sender.name,  // Column A: Sender Name
-        weekKey,      // Column B: Week End Date
-        week.connections_sent || 0,  // Column C
-        week.connections_accepted || 0,  // Column D
-        (week.acceptance_rate || 0).toFixed(2) + '%',  // Column E
-        week.messages_sent || 0,  // Column F
-        week.message_replies || 0,  // Column G
-        (week.reply_rate || 0).toFixed(2) + '%',  // Column H
-        week.open_conversations || 0,  // Column I
-        week.interested || 0  // Column J
-      ];
-      
-      // Write the row
-      sheet.getRange(lastRow, 1, 1, rowData.length).setValues([rowData]);
-      
-      result.processed.push({
-        sender: sender.name,
-        sheet: sheet.getName(),
-        row: lastRow,
-        week: weekKey,
-        cells_updated: rowData.length
-      });
-    }
-  }
-  
-  SpreadsheetApp.flush();
-  return result;
 }
 
 /**
