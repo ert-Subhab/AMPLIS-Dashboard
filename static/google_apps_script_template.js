@@ -327,10 +327,36 @@ function processSheetBatch(sheet, senders) {
         col = weekColumns[normalized];
       }
       
+      // If still not found, try to find closest date within 3 days (handles week boundary issues)
+      if (col === undefined || col === null) {
+        const [targetMonth, targetDay] = weekKey.split('/').map(Number);
+        let closestCol = null;
+        let closestDiff = Infinity;
+        
+        for (const [headerStr, headerCol] of Object.entries(weekColumns)) {
+          if (typeof headerCol === 'number') {
+            const [headerMonth, headerDay] = headerStr.split('/').map(Number);
+            // Check if same month and within 3 days
+            if (headerMonth === targetMonth) {
+              const diff = Math.abs(headerDay - targetDay);
+              if (diff <= 3 && diff < closestDiff) {
+                closestDiff = diff;
+                closestCol = headerCol;
+              }
+            }
+          }
+        }
+        
+        if (closestCol !== null) {
+          col = closestCol;
+          Logger.log(`Matched week ${weekKey} to existing column (closest match within 3 days)`);
+        }
+      }
+      
       // Skip if column still not found (shouldn't happen since we created all columns upfront, but safety check)
       if (col === undefined || col === null) {
-        // Log warning but don't create duplicate column
-        Logger.log(`Warning: Column for week ${weekKey} not found in weekColumns map. Skipping.`);
+        // Log detailed warning for debugging
+        Logger.log(`Warning: Column for week ${weekKey} not found. Available columns: ${Object.keys(weekColumns).join(', ')}`);
         continue;
       }
       
@@ -388,12 +414,23 @@ function processSheetBatch(sheet, senders) {
       });
     } else {
       // Found sender but no matching week columns (all week dates didn't match)
+      // Collect the week keys that were checked for better error reporting
+      const checkedWeeks = [];
+      for (const week of sender.weeks) {
+        const weekDate = week.week_end || week.week_start;
+        if (weekDate) {
+          const weekKey = formatWeekKey(weekDate);
+          if (weekKey) checkedWeeks.push(weekKey);
+        }
+      }
       result.found_skipped.push({ 
         sender: sender.name, 
         sheet: sheet.getName(), 
         row: senderRow,
         reason: 'No matching week columns found',
-        weeks_checked: sender.weeks.length
+        weeks_checked: sender.weeks.length,
+        week_keys: checkedWeeks,
+        available_columns: Object.keys(weekColumns).filter(k => typeof weekColumns[k] === 'number').slice(0, 10) // First 10 for brevity
       });
     }
   }
