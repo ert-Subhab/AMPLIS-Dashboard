@@ -1543,12 +1543,18 @@ def health_check():
         api_key_set = bool(os.environ.get('HEYREACH_API_KEY'))
         base_url_set = os.environ.get('HEYREACH_BASE_URL', 'Not set')
         
+        # Check if template exists
+        template_exists = os.path.exists('templates/dashboard.html')
+        static_dir_exists = os.path.exists('static')
+        
         health_status = {
             'status': 'healthy' if heyreach_client else 'unhealthy',
             'client_initialized': bool(heyreach_client),
             'api_key_set': api_key_set,
             'base_url': base_url_set,
-            'config_source': 'environment' if api_key_set else 'config.yaml'
+            'config_source': 'environment' if api_key_set else 'config.yaml',
+            'template_exists': template_exists,
+            'static_dir_exists': static_dir_exists
         }
         
         if heyreach_client:
@@ -1576,7 +1582,8 @@ def health_check():
             'status': 'error', 
             'message': str(e),
             'client_initialized': bool(heyreach_client),
-            'api_key_set': bool(os.environ.get('HEYREACH_API_KEY'))
+            'api_key_set': bool(os.environ.get('HEYREACH_API_KEY')),
+            'traceback': traceback.format_exc()
         }), 500
 
 
