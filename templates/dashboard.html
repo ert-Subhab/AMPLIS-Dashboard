@@ -6,6 +6,8 @@
     <title>HeyReach Performance Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="{{ url_for('static', filename='js/supabase_integration.js') }}"></script>
 </head>
 <body>
     <div class="dashboard-container">
@@ -197,6 +199,85 @@
                             <span class="btn-icon">🔑</span>
                             <span>Configure OAuth</span>
                         </button>
+                    </div>
+                    
+                    <!-- Supabase & AI Evaluation -->
+                    <div class="export-option-card">
+                        <div class="export-icon">🤖</div>
+                        <h3>Supabase & AI Evaluation</h3>
+                        <p>Connect your Supabase database and use AI to evaluate message threads for open conversations and interested leads.</p>
+                        <button id="toggleSupabaseBtn" class="btn btn-export">
+                            <span class="btn-icon">⚙️</span>
+                            <span>Configure Supabase</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Supabase Configuration Section -->
+                <div class="supabase-config-section" id="supabaseConfigSection" style="display: none; margin-top: 30px; padding: 20px; background-color: #f8f9fa; border-radius: 8px;">
+                    <h3 style="margin-top: 0;">Supabase & AI Configuration</h3>
+                    <p style="color: #666; margin-bottom: 20px;">Configure your Supabase credentials and OpenAI API key to evaluate message threads and calculate metrics.</p>
+                    
+                    <div class="filter-group" style="margin-bottom: 15px;">
+                        <label for="supabaseUrlInput">Supabase Project URL:</label>
+                        <input type="text" id="supabaseUrlInput" class="filter-input" placeholder="https://your-project.supabase.co" style="width: 100%;">
+                        <small style="color: #666; margin-top: 5px; display: block;">Your Supabase project URL. Find it in Settings → API.</small>
+                    </div>
+                    
+                    <div class="filter-group" style="margin-bottom: 15px;">
+                        <label for="supabaseKeyInput">Supabase Anon Key:</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="password" id="supabaseKeyInput" class="filter-input" placeholder="Your Supabase anon/public key" style="flex: 1;">
+                            <button type="button" id="toggleSupabaseKeyBtn" class="btn" style="padding: 8px 15px; background-color: #6c757d; color: white;">Show</button>
+                        </div>
+                        <small style="color: #666; margin-top: 5px; display: block;">Your Supabase anon/public key (not service_role). Find it in Settings → API.</small>
+                    </div>
+                    
+                    <div class="filter-group" style="margin-bottom: 15px;">
+                        <label for="openaiKeyInput">OpenAI API Key:</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="password" id="openaiKeyInput" class="filter-input" placeholder="sk-..." style="flex: 1;">
+                            <button type="button" id="toggleOpenAIKeyBtn" class="btn" style="padding: 8px 15px; background-color: #6c757d; color: white;">Show</button>
+                        </div>
+                        <small style="color: #666; margin-top: 5px; display: block;">Your OpenAI API key for AI evaluation. Get it from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>.</small>
+                    </div>
+                    
+                    <div class="filter-group" style="margin-bottom: 15px;">
+                        <button id="saveSupabaseConfigBtn" class="btn btn-primary">Save Configuration</button>
+                        <button id="testSupabaseConnectionBtn" class="btn" style="background-color: #6c757d; color: white; margin-left: 10px;">Test Connection</button>
+                    </div>
+                    
+                    <div id="supabaseStatus" style="display: none; padding: 10px; border-radius: 4px; margin-top: 10px;"></div>
+                    
+                    <!-- AI Evaluation Section -->
+                    <div id="aiEvaluationSection" style="display: none; margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6;">
+                        <h4>AI Message Evaluation</h4>
+                        <p style="color: #666; margin-bottom: 15px;">Evaluate unevaluated messages using AI to determine open conversations and interested leads.</p>
+                        
+                        <div class="filter-group" style="margin-bottom: 15px;">
+                            <button id="evaluateMessagesBtn" class="btn btn-primary">
+                                <span class="btn-icon">🤖</span>
+                                <span>Evaluate Messages</span>
+                            </button>
+                            <button id="getWeeklyStatsBtn" class="btn" style="background-color: #28a745; color: white; margin-left: 10px;">
+                                <span class="btn-icon">📊</span>
+                                <span>Get Weekly Stats</span>
+                            </button>
+                        </div>
+                        
+                        <div id="evaluationProgress" style="display: none; margin-top: 15px;">
+                            <div style="background-color: #e9ecef; border-radius: 4px; padding: 10px;">
+                                <div id="evaluationStatus" style="margin-bottom: 10px;"></div>
+                                <div style="background-color: #fff; border-radius: 4px; height: 20px; overflow: hidden;">
+                                    <div id="evaluationProgressBar" style="background-color: #007bff; height: 100%; width: 0%; transition: width 0.3s;"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="weeklyStatsResults" style="display: none; margin-top: 20px;">
+                            <h5>Weekly Statistics</h5>
+                            <div id="weeklyStatsTable" style="overflow-x: auto;"></div>
+                        </div>
                     </div>
                 </div>
                 

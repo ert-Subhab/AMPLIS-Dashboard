@@ -53,6 +53,26 @@ async function initializeDashboard() {
         if (copyScriptBtn) copyScriptBtn.addEventListener('click', copyAppsScriptTemplate);
         if (openOAuthSectionBtn) openOAuthSectionBtn.addEventListener('click', scrollToOAuthSection);
         
+        // Supabase event listeners
+        const toggleSupabaseBtn = document.getElementById('toggleSupabaseBtn');
+        const saveSupabaseConfigBtn = document.getElementById('saveSupabaseConfigBtn');
+        const testSupabaseConnectionBtn = document.getElementById('testSupabaseConnectionBtn');
+        const evaluateMessagesBtn = document.getElementById('evaluateMessagesBtn');
+        const getWeeklyStatsBtn = document.getElementById('getWeeklyStatsBtn');
+        const toggleSupabaseKeyBtn = document.getElementById('toggleSupabaseKeyBtn');
+        const toggleOpenAIKeyBtn = document.getElementById('toggleOpenAIKeyBtn');
+        
+        if (toggleSupabaseBtn) toggleSupabaseBtn.addEventListener('click', toggleSupabaseConfig);
+        if (saveSupabaseConfigBtn) saveSupabaseConfigBtn.addEventListener('click', saveSupabaseConfig);
+        if (testSupabaseConnectionBtn) testSupabaseConnectionBtn.addEventListener('click', testSupabaseConnection);
+        if (evaluateMessagesBtn) evaluateMessagesBtn.addEventListener('click', evaluateMessages);
+        if (getWeeklyStatsBtn) getWeeklyStatsBtn.addEventListener('click', getWeeklyStatsFromSupabase);
+        if (toggleSupabaseKeyBtn) toggleSupabaseKeyBtn.addEventListener('click', () => togglePasswordVisibility('supabaseKeyInput', 'toggleSupabaseKeyBtn'));
+        if (toggleOpenAIKeyBtn) toggleOpenAIKeyBtn.addEventListener('click', () => togglePasswordVisibility('openaiKeyInput', 'toggleOpenAIKeyBtn'));
+        
+        // Load saved Supabase config
+        loadSupabaseConfig();
+        
         // Check Google Sheets connection status on load
         checkGoogleSheetsStatus();
         
