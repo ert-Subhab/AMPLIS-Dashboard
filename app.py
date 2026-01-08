@@ -1138,7 +1138,8 @@ def send_to_apps_script():
             },
             'senders': [],
             'sender_id_mapping': {},  # Map sender names to IDs for matching
-            'client_groups': client_groups  # Include client groups for sheet matching
+            'client_groups': client_groups,  # Include client groups for sheet matching
+            'update_mode': update_mode  # 'update_columns' or 'create_rows'
         }
         
         # Build reverse mapping: name -> ID (for Apps Script to look up by name)
