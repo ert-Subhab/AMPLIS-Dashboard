@@ -353,11 +353,43 @@ function processSheetBatch(sheet, senders) {
         }
       }
       
-      // Skip if column still not found (shouldn't happen since we created all columns upfront, but safety check)
+      // If column still not found, create it at the end
       if (col === undefined || col === null) {
-        // Log detailed warning for debugging
-        Logger.log(`Warning: Column for week ${weekKey} not found. Available columns: ${Object.keys(weekColumns).join(', ')}`);
-        continue;
+        // Log that we're creating a new column
+        Logger.log(`Creating new column for week ${weekKey} at the end of the sheet`);
+        
+        // Get current last column (refresh data to get accurate count)
+        const currentDataRange = sheet.getDataRange();
+        const currentNumCols = currentDataRange.getNumColumns();
+        const currentLastCol = currentNumCols - 1; // 0-indexed
+        
+        // Insert new column at the end
+        const insertAfterCol = currentLastCol + 1; // 1-indexed for insertColumnAfter
+        sheet.insertColumnAfter(insertAfterCol);
+        
+        // Update actualLastCol to reflect the new column
+        actualLastCol = currentLastCol + 1; // New column is now at this position (0-indexed)
+        const newColIndex = actualLastCol + 1; // 1-indexed for setValue
+        
+        // Set the header
+        sheet.getRange(headerRowIndex + 1, newColIndex).setValue(weekKey);
+        
+        // Add to weekColumns map
+        col = actualLastCol; // Store as 0-indexed for array access
+        weekColumns[weekKey] = col;
+        
+        // Also store normalized version
+        const parts = weekKey.split('/');
+        const normalized = parseInt(parts[0]) + '/' + parseInt(parts[1]);
+        weekColumns[normalized] = col;
+        
+        // Track that we created this column
+        result.columns_created.push({ sheet: sheet.getName(), column: weekKey, position: newColIndex });
+        
+        // Refresh data to ensure we have accurate column count
+        SpreadsheetApp.flush();
+        allValues = sheet.getDataRange().getValues();
+        numCols = allValues[0] ? allValues[0].length : 0;
       }
       
       let weekHadUpdates = false;
