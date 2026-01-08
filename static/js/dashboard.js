@@ -822,6 +822,7 @@ async function sendToAppsScript() {
         
         // Get selected update mode
         const updateMode = document.querySelector('input[name="updateMode"]:checked')?.value || 'update_columns';
+        console.log('Sending to Apps Script with update_mode:', updateMode);
         
         const response = await fetch('/api/send-to-apps-script', {
             method: 'POST',
