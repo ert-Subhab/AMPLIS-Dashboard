@@ -63,7 +63,7 @@ function loadSupabaseConfig() {
 // Save Supabase configuration to localStorage
 function saveSupabaseConfig() {
     try {
-        const supabaseUrl = document.getElementById('supabaseUrlInput').value.trim();
+        let supabaseUrl = document.getElementById('supabaseUrlInput').value.trim();
         const supabaseKey = document.getElementById('supabaseKeyInput').value.trim();
         const openaiKey = document.getElementById('openaiKeyInput').value.trim();
         
@@ -71,6 +71,12 @@ function saveSupabaseConfig() {
             showError('Please enter both Supabase URL and Key');
             return;
         }
+        
+        // Clean the URL to ensure it's just the base URL
+        supabaseUrl = cleanSupabaseUrl(supabaseUrl);
+        
+        // Update the input field with cleaned URL
+        document.getElementById('supabaseUrlInput').value = supabaseUrl;
         
         if (typeof supabase === 'undefined' || typeof initializeSupabase !== 'function') {
             showError('Supabase libraries not loaded. Please refresh the page.');
@@ -104,16 +110,42 @@ function saveSupabaseConfig() {
     }
 }
 
+// Clean Supabase URL - extract base URL if full REST URL is provided
+function cleanSupabaseUrl(url) {
+    if (!url) return '';
+    
+    // Remove trailing slashes
+    url = url.trim().replace(/\/+$/, '');
+    
+    // If it contains /rest/v1/, extract just the base URL
+    if (url.includes('/rest/v1/')) {
+        url = url.split('/rest/v1/')[0];
+    }
+    
+    // If it contains /rest/, extract just the base URL
+    if (url.includes('/rest/')) {
+        url = url.split('/rest/')[0];
+    }
+    
+    return url;
+}
+
 // Test Supabase connection
 async function testSupabaseConnection() {
     try {
-        const supabaseUrl = document.getElementById('supabaseUrlInput').value.trim();
+        let supabaseUrl = document.getElementById('supabaseUrlInput').value.trim();
         const supabaseKey = document.getElementById('supabaseKeyInput').value.trim();
         
         if (!supabaseUrl || !supabaseKey) {
             showError('Please enter both Supabase URL and Key');
             return;
         }
+        
+        // Clean the URL to ensure it's just the base URL
+        supabaseUrl = cleanSupabaseUrl(supabaseUrl);
+        
+        // Update the input field with cleaned URL
+        document.getElementById('supabaseUrlInput').value = supabaseUrl;
         
         showLoading(true);
         
@@ -126,7 +158,13 @@ async function testSupabaseConnection() {
         const testClient = supabase.createClient(supabaseUrl, supabaseKey);
         const { data, error } = await testClient.from('heyreach_messages').select('id').limit(1);
         
-        if (error) throw error;
+        if (error) {
+            // Check if it's a table not found error
+            if (error.code === 'PGRST116' || error.message.includes('could not find') || error.message.includes('does not exist')) {
+                throw new Error('Table "heyreach_messages" not found. Please create it in Supabase first. See the setup guide for SQL schema.');
+            }
+            throw error;
+        }
         
         showSupabaseStatus('Connection successful!', 'success');
         showMessage('Supabase connection test passed!', 'success');

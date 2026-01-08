@@ -195,13 +195,29 @@
                                 <div class="help-step">
                                     <div class="step-number">1</div>
                                     <div class="step-content">
-                                        <h4>Get Your Supabase Credentials</h4>
-                                        <p>Go to your Supabase Dashboard → <strong>Settings</strong> → <strong>API</strong></p>
-                                        <p>Copy your <strong>Project URL</strong> and <strong>anon/public key</strong></p>
+                                        <h4>Create Supabase Table ⚠️</h4>
+                                        <p><strong style="color: #dc3545;">IMPORTANT: Do this first!</strong></p>
+                                        <p>Go to your Supabase project: <a href="https://supabase.com/dashboard" target="_blank">supabase.com/dashboard</a></p>
+                                        <p>Navigate to <strong>SQL Editor</strong> and run the schema SQL:</p>
+                                        <p style="margin-top: 10px;"><a href="https://github.com/ert-Subhab/AMPLIS-Dashboard/blob/main/supabase_schema.sql" target="_blank" style="color: #007bff; text-decoration: underline;">📄 View SQL Schema →</a></p>
+                                        <p style="margin-top: 10px; font-size: 0.9em; color: #666;">Or copy the SQL from <code>supabase_schema.sql</code> in the repository.</p>
                                     </div>
                                 </div>
                                 <div class="help-step">
                                     <div class="step-number">2</div>
+                                    <div class="step-content">
+                                        <h4>Get Supabase Credentials</h4>
+                                        <p>In your Supabase project dashboard:</p>
+                                        <ul style="margin-left: 20px; line-height: 1.8;">
+                                            <li>Go to <strong>Settings → API</strong></li>
+                                            <li>Copy your <strong>Project URL</strong> (base URL only, e.g., <code>https://xxxxx.supabase.co</code>)</li>
+                                            <li>Copy your <strong>anon/public key</strong></li>
+                                        </ul>
+                                        <p style="margin-top: 10px; font-size: 0.9em; color: #dc3545;"><strong>Note:</strong> Use only the base URL (without <code>/rest/v1/</code>). The dashboard will handle the rest.</p>
+                                    </div>
+                                </div>
+                                <div class="help-step">
+                                    <div class="step-number">3</div>
                                     <div class="step-content">
                                         <h4>Create n8n Workflow</h4>
                                         <p><strong>Add Webhook Node</strong> to receive from HeyReach</p>
@@ -214,13 +230,14 @@
                                                     <li><code>apikey</code>: Your anon key</li>
                                                     <li><code>Authorization</code>: <code>Bearer YOUR-ANON-KEY</code></li>
                                                     <li><code>Content-Type</code>: <code>application/json</code></li>
+                                                    <li><code>Prefer</code>: <code>return=minimal</code> (optional, reduces response size)</li>
                                                 </ul>
                                             </li>
                                         </ul>
                                     </div>
                                 </div>
                                 <div class="help-step">
-                                    <div class="step-number">3</div>
+                                    <div class="step-number">4</div>
                                     <div class="step-content">
                                         <h4>Map the Data</h4>
                                         <p>In HTTP Request body (JSON):</p>
@@ -230,15 +247,16 @@
   "timestamp": "{{ $json.body.timestamp }}",
   "is_inmail": {{ $json.body.is_inmail }},
   "conversation_id": "{{ $json.body.conversation_id }}",
-  "campaign": {{ $json.body.campaign }},
-  "sender": {{ $json.body.sender }},
-  "lead": {{ $json.body.lead }},
-  "recent_messages": {{ $json.body.recent_messages }}
+  "campaign": {{ JSON.stringify($json.body.campaign) }},
+  "sender": {{ JSON.stringify($json.body.sender) }},
+  "lead": {{ JSON.stringify($json.body.lead) }},
+  "recent_messages": {{ JSON.stringify($json.body.recent_messages) }}
 }{% endraw %}</pre>
+                                        <p style="margin-top: 10px; font-size: 0.9em; color: #dc3545;"><strong>Important:</strong> Use <code>JSON.stringify()</code> for nested objects (campaign, sender, lead, recent_messages).</p>
                                     </div>
                                 </div>
                                 <div class="help-step">
-                                    <div class="step-number">4</div>
+                                    <div class="step-number">5</div>
                                     <div class="step-content">
                                         <h4>Test & Activate</h4>
                                         <p>Activate your n8n workflow and test with a HeyReach webhook.</p>
@@ -290,7 +308,7 @@
                     <div class="filter-group" style="margin-bottom: 15px;">
                         <label for="supabaseUrlInput">Supabase Project URL:</label>
                         <input type="text" id="supabaseUrlInput" class="filter-input" placeholder="https://your-project.supabase.co" style="width: 100%;">
-                        <small style="color: #666; margin-top: 5px; display: block;">Your Supabase project URL. Find it in Settings → API.</small>
+                        <small style="color: #666; margin-top: 5px; display: block;">Your Supabase base URL only (e.g., <code>https://xxxxx.supabase.co</code>). Do NOT include <code>/rest/v1/</code>. Find it in Settings → API.</small>
                     </div>
                     
                     <div class="filter-group" style="margin-bottom: 15px;">
