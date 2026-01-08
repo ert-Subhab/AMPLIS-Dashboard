@@ -224,7 +224,7 @@
                                     <div class="step-content">
                                         <h4>Map the Data</h4>
                                         <p>In HTTP Request body (JSON):</p>
-                                        <pre style="background-color: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 11px;">{
+                                        <pre style="background-color: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 11px;">{% raw %}{
   "correlation_id": "{{ $json.body.correlation_id }}",
   "event_type": "{{ $json.body.event_type }}",
   "timestamp": "{{ $json.body.timestamp }}",
@@ -234,7 +234,7 @@
   "sender": {{ $json.body.sender }},
   "lead": {{ $json.body.lead }},
   "recent_messages": {{ $json.body.recent_messages }}
-}</pre>
+}{% endraw %}</pre>
                                     </div>
                                 </div>
                                 <div class="help-step">
