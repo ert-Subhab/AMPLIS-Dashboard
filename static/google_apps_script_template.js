@@ -87,7 +87,9 @@ function doPost(e) {
     }
     
     // Get update mode from data (default to 'update_columns')
-    const updateMode = data.update_mode || 'update_columns';
+    // IMPORTANT: Only use 'create_rows' if explicitly set, otherwise always use 'update_columns'
+    const updateMode = (data.update_mode === 'create_rows') ? 'create_rows' : 'update_columns';
+    Logger.log(`Update mode received: ${data.update_mode}, using: ${updateMode}`);
     
     // Process each sheet with batch updates
     for (const [sheetName, sheetData] of Object.entries(sendersBySheet)) {
@@ -157,9 +159,15 @@ function processSheetBatch(sheet, senders, updateMode = 'update_columns') {
   };
   
   // If create_rows mode, use different processing logic
+  // IMPORTANT: Only create rows if explicitly set to 'create_rows'
+  // Default to 'update_columns' to prevent accidental row creation
   if (updateMode === 'create_rows') {
+    Logger.log(`Using create_rows mode for sheet: ${sheet.getName()}`);
     return processSheetCreateRows(sheet, senders);
   }
+  
+  // Default mode: update_columns - NEVER create rows, only update existing cells
+  Logger.log(`Using update_columns mode for sheet: ${sheet.getName()}`);
   
   // Get all data from sheet at once
   const dataRange = sheet.getDataRange();
@@ -613,6 +621,9 @@ function formatWeekKey(dateStr) {
  * Each sender-week combination becomes a new row
  */
 function processSheetCreateRows(sheet, senders) {
+  // SAFETY CHECK: This function should ONLY be called when explicitly in create_rows mode
+  Logger.log(`processSheetCreateRows called for sheet: ${sheet.getName()}, senders: ${senders.length}`);
+  
   const result = { 
     processed: [],
     found_skipped: [],
@@ -629,6 +640,9 @@ function processSheetCreateRows(sheet, senders) {
   
   // Find the last row with data (or start at row 1 if empty)
   let lastRow = numRows;
+  
+  // IMPORTANT: Only create rows in columns A-J (the new row format)
+  // Do NOT touch existing sender rows or week columns
   
   // Define column structure for new rows
   // Column A: Sender Name
