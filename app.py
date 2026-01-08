@@ -29,6 +29,23 @@ app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)  # Generate a secret key for sessions
 CORS(app)
 
+# Add error handlers
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors"""
+    logger.error(f"Internal server error: {error}")
+    import traceback
+    logger.error(traceback.format_exc())
+    return jsonify({
+        'error': 'Internal server error',
+        'message': str(error) if error else 'An unexpected error occurred'
+    }), 500
+
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 errors"""
+    return jsonify({'error': 'Not found'}), 404
+
 # Global client instance
 heyreach_client = None
 
@@ -303,7 +320,13 @@ except Exception as e:
 @app.route('/')
 def index():
     """Render dashboard homepage"""
-    return render_template('dashboard.html')
+    try:
+        return render_template('dashboard.html')
+    except Exception as e:
+        logger.error(f"Error rendering dashboard template: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return f"<h1>Error loading dashboard</h1><p>{str(e)}</p><pre>{traceback.format_exc()}</pre>", 500
 
 
 @app.route('/static/google_apps_script_template.js')
