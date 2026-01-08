@@ -1265,6 +1265,12 @@ def send_to_apps_script():
             if first_sender.get('weeks') and len(first_sender['weeks']) > 0:
                 first_week = first_sender['weeks'][0]
                 logger.info(f"First week example: week_start='{first_week.get('week_start')}', week_end='{first_week.get('week_end')}', keys={list(first_week.keys())}")
+            else:
+                logger.info(f"First sender has NO weeks data (empty array)")
+            
+            # Count how many senders have empty weeks
+            empty_weeks_count = sum(1 for s in formatted_data['senders'] if not s.get('weeks') or len(s.get('weeks', [])) == 0)
+            logger.info(f"Senders with empty weeks: {empty_weeks_count}/{len(formatted_data['senders'])}")
         
         # Send to Apps Script (increased timeout for large datasets)
         try:

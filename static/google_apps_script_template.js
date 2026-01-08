@@ -51,7 +51,8 @@ function doPost(e) {
       const senderId = sender.sender_id;
       const weeks = sender.weeks || [];
       
-      if (!senderName || weeks.length === 0) continue;
+      // Skip only if no sender name (but allow empty weeks - we'll handle that later)
+      if (!senderName) continue;
       
       // Find client/sheet for this sender
       let clientName = senderToClient[senderId];
@@ -210,7 +211,13 @@ function processSheetBatch(sheet, senders) {
       const weekDate = week.week_end || week.week_start;
       if (weekDate) {
         const weekKey = formatWeekKey(weekDate);
-        if (weekKey) allWeekDates.add(weekKey);
+        if (weekKey) {
+          allWeekDates.add(weekKey);
+          // Log first few weeks for debugging
+          if (allWeekDates.size <= 3) {
+            Logger.log(`Week data: week_start=${week.week_start}, week_end=${week.week_end}, formatted=${weekKey}`);
+          }
+        }
       }
     }
   }
