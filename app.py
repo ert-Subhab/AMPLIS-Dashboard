@@ -325,8 +325,35 @@ def index():
     except Exception as e:
         logger.error(f"Error rendering dashboard template: {e}")
         import traceback
-        logger.error(traceback.format_exc())
-        return f"<h1>Error loading dashboard</h1><p>{str(e)}</p><pre>{traceback.format_exc()}</pre>", 500
+        error_traceback = traceback.format_exc()
+        logger.error(error_traceback)
+        # Return a simple HTML error page
+        error_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Error - HeyReach Dashboard</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }}
+                .error-container {{ max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }}
+                h1 {{ color: #dc3545; }}
+                pre {{ background: #f8f9fa; padding: 15px; border-radius: 4px; overflow-x: auto; }}
+            </style>
+        </head>
+        <body>
+            <div class="error-container">
+                <h1>⚠️ Error Loading Dashboard</h1>
+                <p><strong>Error:</strong> {str(e)}</p>
+                <details>
+                    <summary>Technical Details</summary>
+                    <pre>{error_traceback}</pre>
+                </details>
+                <p><a href="/api/health">Check Health Status</a></p>
+            </div>
+        </body>
+        </html>
+        """
+        return error_html, 500
 
 
 @app.route('/static/google_apps_script_template.js')
