@@ -46,6 +46,13 @@ This guide will help you configure n8n to automatically send HeyReach message we
    - Body: Map the webhook data to match Supabase schema
 
 3. **Map the Data** (in HTTP Request body):
+   
+   **IMPORTANT**: Make sure there are NO line breaks inside the `{{ }}` expressions!
+   
+   In the HTTP Request node, set:
+   - **Body Content Type**: `JSON`
+   - **Specify Body**: `Using JSON`
+   - **JSON** (text area):
 ```json
 {
   "correlation_id": "{{ $json.body.correlation_id }}",
@@ -53,12 +60,18 @@ This guide will help you configure n8n to automatically send HeyReach message we
   "timestamp": "{{ $json.body.timestamp }}",
   "is_inmail": {{ $json.body.is_inmail }},
   "conversation_id": "{{ $json.body.conversation_id }}",
-  "campaign": {{ $json.body.campaign }},
-  "sender": {{ $json.body.sender }},
-  "lead": {{ $json.body.lead }},
-  "recent_messages": {{ $json.body.recent_messages }}
+  "campaign": {{ JSON.stringify($json.body.campaign) }},
+  "sender": {{ JSON.stringify($json.body.sender) }},
+  "lead": {{ JSON.stringify($json.body.lead) }},
+  "recent_messages": {{ JSON.stringify($json.body.recent_messages) }}
 }
 ```
+
+   **Common Mistakes to Avoid:**
+   - ❌ Don't put line breaks inside `{{ }}` expressions
+   - ❌ Don't add extra `{` braces
+   - ✅ Use `JSON.stringify()` for nested objects (campaign, sender, lead, recent_messages)
+   - ✅ Keep the entire JSON on one line per field, or use proper JSON formatting
 
 ### Option B: Using Supabase Edge Function (More Secure)
 
