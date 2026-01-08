@@ -73,9 +73,9 @@ async function getUnevaluatedMessages(limit = 100) {
 }
 
 /**
- * Evaluate conversation thread using ChatGPT API
+ * Evaluate conversation thread using AI (supports multiple providers)
  */
-async function evaluateConversationWithAI(conversationThread, openaiApiKey) {
+async function evaluateConversationWithAI(conversationThread, aiProvider, apiKey) {
     if (!conversationThread || conversationThread.length === 0) {
         throw new Error('Empty conversation thread');
     }
@@ -98,7 +98,7 @@ async function evaluateConversationWithAI(conversationThread, openaiApiKey) {
         }
     }
     
-    // Prepare prompt for ChatGPT
+    // Prepare prompt for AI
     const prompt = `You are analyzing a LinkedIn outreach conversation thread. Evaluate the entire conversation and determine:
 
 1. Is this an OPEN CONVERSATION? (The lead is actively engaging, asking questions, showing interest in continuing the dialogue)
@@ -116,45 +116,110 @@ Respond in JSON format:
 }`;
 
     try {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${openaiApiKey}`
-            },
-            body: JSON.stringify({
-                model: 'gpt-4o-mini', // Using cheaper model, can be changed to gpt-4 for better accuracy
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'You are an expert at analyzing business conversations and determining engagement levels and buying intent.'
+        let response;
+        let modelVersion;
+        
+        switch (aiProvider) {
+            case 'openai':
+                modelVersion = 'gpt-4o-mini';
+                response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
                     },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                temperature: 0.3, // Lower temperature for more consistent results
-                response_format: { type: 'json_object' }
-            })
-        });
+                    body: JSON.stringify({
+                        model: modelVersion,
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'You are an expert at analyzing business conversations and determining engagement levels and buying intent.'
+                            },
+                            {
+                                role: 'user',
+                                content: prompt
+                            }
+                        ],
+                        temperature: 0.3,
+                        response_format: { type: 'json_object' }
+                    })
+                });
+                break;
+                
+            case 'claude':
+                modelVersion = 'claude-3-5-sonnet-20241022';
+                response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': apiKey,
+                        'anthropic-version': '2023-06-01'
+                    },
+                    body: JSON.stringify({
+                        model: modelVersion,
+                        max_tokens: 1024,
+                        system: 'You are an expert at analyzing business conversations and determining engagement levels and buying intent. Always respond in valid JSON format.',
+                        messages: [
+                            {
+                                role: 'user',
+                                content: prompt
+                            }
+                        ]
+                    })
+                });
+                break;
+                
+            case 'gemini':
+                modelVersion = 'gemini-pro';
+                response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelVersion}:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{
+                                text: `System: You are an expert at analyzing business conversations and determining engagement levels and buying intent. Always respond in valid JSON format.\n\nUser: ${prompt}`
+                            }]
+                        }],
+                        generationConfig: {
+                            temperature: 0.3,
+                            responseMimeType: 'application/json'
+                        }
+                    })
+                });
+                break;
+                
+            default:
+                throw new Error(`Unsupported AI provider: ${aiProvider}`);
+        }
         
         if (!response.ok) {
             const error = await response.json();
-            throw new Error(error.error?.message || 'OpenAI API error');
+            throw new Error(error.error?.message || error.message || `${aiProvider} API error`);
         }
         
         const data = await response.json();
-        const content = JSON.parse(data.choices[0].message.content);
+        let content;
+        
+        // Parse response based on provider
+        if (aiProvider === 'openai') {
+            content = JSON.parse(data.choices[0].message.content);
+        } else if (aiProvider === 'claude') {
+            content = JSON.parse(data.content[0].text);
+        } else if (aiProvider === 'gemini') {
+            content = JSON.parse(data.candidates[0].content.parts[0].text);
+        }
         
         return {
             is_open_conversation: content.is_open_conversation === true,
             is_interested: content.is_interested === true,
             ai_confidence: parseFloat(content.confidence) || 0.5,
-            ai_reasoning: content.reasoning || 'No reasoning provided'
+            ai_reasoning: content.reasoning || 'No reasoning provided',
+            ai_model_version: modelVersion
         };
     } catch (error) {
-        console.error('Error evaluating with AI:', error);
+        console.error(`Error evaluating with ${aiProvider}:`, error);
         throw error;
     }
 }
@@ -177,7 +242,7 @@ async function updateAIEvaluation(messageId, evaluation, conversationThread) {
                 is_interested: evaluation.is_interested,
                 ai_confidence: evaluation.ai_confidence,
                 ai_reasoning: evaluation.ai_reasoning,
-                ai_model_version: 'gpt-4o-mini',
+                ai_model_version: evaluation.ai_model_version || 'unknown',
                 conversation_thread: conversationThread
             })
             .eq('id', messageId)
@@ -194,7 +259,7 @@ async function updateAIEvaluation(messageId, evaluation, conversationThread) {
 /**
  * Process and evaluate a single message
  */
-async function processMessageEvaluation(message, openaiApiKey) {
+async function processMessageEvaluation(message, aiProvider, apiKey) {
     try {
         // Get full conversation thread
         const thread = await getConversationThread(message.conversation_id);
@@ -204,7 +269,7 @@ async function processMessageEvaluation(message, openaiApiKey) {
         }
         
         // Evaluate with AI
-        const evaluation = await evaluateConversationWithAI(thread, openaiApiKey);
+        const evaluation = await evaluateConversationWithAI(thread, aiProvider, apiKey);
         
         // Update in Supabase
         await updateAIEvaluation(message.id, evaluation, thread);
@@ -316,6 +381,101 @@ function getWeekEndDate(date) {
 function formatWeekKey(date) {
     const d = new Date(date);
     return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/**
+ * Merge Supabase stats with HeyReach performance data
+ * This adds open_conversations and interested from Supabase to HeyReach data
+ * Matches by sender_id and week_end date
+ */
+async function mergeSupabaseStatsWithHeyReach(performanceData, startDate, endDate, senderIdMapping = {}) {
+    try {
+        if (!supabaseClient) {
+            // Supabase not configured, return data as-is (already has 0 values from backend)
+            return performanceData;
+        }
+        
+        // Get stats from Supabase grouped by sender_id and week
+        const { data, error } = await supabaseClient
+            .from('heyreach_messages')
+            .select('*')
+            .gte('timestamp', startDate)
+            .lte('timestamp', endDate)
+            .eq('ai_evaluated', true);
+        
+        if (error) throw error;
+        
+        // Group by sender_id and week
+        const senderWeekStats = {};
+        
+        for (const message of data || []) {
+            const senderId = message.sender_id;
+            if (!senderId) continue;
+            
+            const weekEnd = getWeekEndDate(new Date(message.timestamp));
+            const weekKey = formatWeekKey(weekEnd);
+            
+            if (!senderWeekStats[senderId]) {
+                senderWeekStats[senderId] = {};
+            }
+            
+            if (!senderWeekStats[senderId][weekKey]) {
+                senderWeekStats[senderId][weekKey] = {
+                    open_conversations: new Set(),
+                    interested: new Set()
+                };
+            }
+            
+            if (message.is_open_conversation) {
+                senderWeekStats[senderId][weekKey].open_conversations.add(message.conversation_id);
+            }
+            
+            if (message.is_interested) {
+                senderWeekStats[senderId][weekKey].interested.add(message.conversation_id);
+            }
+        }
+        
+        // Create a deep copy to avoid mutating original
+        const mergedData = JSON.parse(JSON.stringify(performanceData));
+        
+        // Merge stats into performance data by matching sender_id and week
+        for (const senderName in mergedData.senders || {}) {
+            const senderWeeks = mergedData.senders[senderName] || [];
+            
+            // Find sender_id for this sender name
+            let senderId = null;
+            for (const [id, name] of Object.entries(senderIdMapping)) {
+                if (name === senderName) {
+                    senderId = parseInt(id);
+                    break;
+                }
+            }
+            
+            if (!senderId) continue; // Skip if we can't find sender_id
+            
+            for (const week of senderWeeks) {
+                const weekKey = formatWeekKey(week.week_end || week.week_start);
+                if (!weekKey) continue;
+                
+                // Get stats for this sender and week
+                if (senderWeekStats[senderId] && senderWeekStats[senderId][weekKey]) {
+                    const stats = senderWeekStats[senderId][weekKey];
+                    week.open_conversations = stats.open_conversations.size;
+                    week.interested = stats.interested.size;
+                } else {
+                    // Keep default 0 values if no Supabase data
+                    week.open_conversations = 0;
+                    week.interested = 0;
+                }
+            }
+        }
+        
+        return mergedData;
+    } catch (error) {
+        console.error('Error merging Supabase stats:', error);
+        // Return original data if merge fails
+        return performanceData;
+    }
 }
 
 /**

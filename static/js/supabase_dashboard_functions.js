@@ -1,17 +1,52 @@
 // ==================== Supabase Integration Functions ====================
 // Add these functions to the end of dashboard.js
 
+// Update AI provider labels based on selection
+function updateAIProviderLabels() {
+    const providerSelect = document.getElementById('aiProviderSelect');
+    const apiKeyLabel = document.getElementById('aiApiKeyLabel');
+    const apiKeyInput = document.getElementById('aiApiKeyInput');
+    const apiKeyHelp = document.getElementById('aiApiKeyHelp');
+    
+    if (!providerSelect || !apiKeyLabel || !apiKeyInput || !apiKeyHelp) return;
+    
+    const provider = providerSelect.value;
+    
+    switch (provider) {
+        case 'openai':
+            apiKeyLabel.textContent = 'OpenAI API Key:';
+            apiKeyInput.placeholder = 'sk-...';
+            apiKeyHelp.innerHTML = 'Your OpenAI API key. Get it from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>.';
+            break;
+        case 'claude':
+            apiKeyLabel.textContent = 'Anthropic API Key:';
+            apiKeyInput.placeholder = 'sk-ant-...';
+            apiKeyHelp.innerHTML = 'Your Anthropic API key. Get it from <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>.';
+            break;
+        case 'gemini':
+            apiKeyLabel.textContent = 'Google API Key:';
+            apiKeyInput.placeholder = 'Enter your API key...';
+            apiKeyHelp.innerHTML = 'Your Google API key for Gemini. Get it from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a>.';
+            break;
+    }
+}
+
 // Load Supabase configuration from localStorage
 function loadSupabaseConfig() {
     try {
         const config = JSON.parse(localStorage.getItem('supabaseConfig') || '{}');
         const urlInput = document.getElementById('supabaseUrlInput');
         const keyInput = document.getElementById('supabaseKeyInput');
-        const openaiInput = document.getElementById('openaiKeyInput');
+        const aiKeyInput = document.getElementById('aiApiKeyInput');
+        const aiProviderSelect = document.getElementById('aiProviderSelect');
         
         if (urlInput && config.supabaseUrl) urlInput.value = config.supabaseUrl;
         if (keyInput && config.supabaseKey) keyInput.value = config.supabaseKey;
-        if (openaiInput && config.openaiKey) openaiInput.value = config.openaiKey;
+        if (aiKeyInput && config.aiApiKey) aiKeyInput.value = config.aiApiKey;
+        if (aiProviderSelect && config.aiProvider) {
+            aiProviderSelect.value = config.aiProvider;
+            updateAIProviderLabels();
+        }
         
         // Initialize Supabase if credentials are available
         if (config.supabaseUrl && config.supabaseKey && typeof initializeSupabase === 'function') {
@@ -48,7 +83,15 @@ function saveSupabaseConfig() {
             return;
         }
         
-        const config = { supabaseUrl, supabaseKey, openaiKey };
+        const aiProvider = document.getElementById('aiProviderSelect')?.value || 'openai';
+        const aiApiKey = document.getElementById('aiApiKeyInput')?.value.trim() || '';
+        
+        const config = { 
+            supabaseUrl, 
+            supabaseKey, 
+            aiApiKey,
+            aiProvider
+        };
         localStorage.setItem('supabaseConfig', JSON.stringify(config));
         
         showSupabaseStatus('Configuration saved and connected!', 'success');
@@ -142,10 +185,11 @@ function togglePasswordVisibility(inputId, buttonId) {
 async function evaluateMessages() {
     try {
         const config = JSON.parse(localStorage.getItem('supabaseConfig') || '{}');
-        const openaiKey = config.openaiKey || document.getElementById('openaiKeyInput')?.value.trim();
+        const aiProvider = config.aiProvider || document.getElementById('aiProviderSelect')?.value || 'openai';
+        const aiApiKey = config.aiApiKey || document.getElementById('aiApiKeyInput')?.value.trim();
         
-        if (!openaiKey) {
-            showError('Please enter your OpenAI API key');
+        if (!aiApiKey) {
+            showError(`Please enter your ${aiProvider === 'openai' ? 'OpenAI' : aiProvider === 'claude' ? 'Anthropic' : 'Google'} API key`);
             return;
         }
         
@@ -172,7 +216,7 @@ async function evaluateMessages() {
             return;
         }
         
-        if (statusDiv) statusDiv.textContent = `Evaluating ${messages.length} messages...`;
+        if (statusDiv) statusDiv.textContent = `Evaluating ${messages.length} messages using ${aiProvider}...`;
         if (progressBar) progressBar.style.width = '20%';
         
         let processed = 0, errors = 0;
@@ -180,9 +224,9 @@ async function evaluateMessages() {
         for (let i = 0; i < messages.length; i++) {
             const message = messages[i];
             try {
-                if (statusDiv) statusDiv.textContent = `Evaluating message ${i + 1} of ${messages.length}...`;
+                if (statusDiv) statusDiv.textContent = `Evaluating message ${i + 1} of ${messages.length} using ${aiProvider}...`;
                 if (progressBar) progressBar.style.width = `${20 + (i / messages.length) * 70}%`;
-                await processMessageEvaluation(message, openaiKey);
+                await processMessageEvaluation(message, aiProvider, aiApiKey);
                 processed++;
             } catch (error) {
                 console.error(`Error evaluating message ${message.id}:`, error);
@@ -200,6 +244,22 @@ async function evaluateMessages() {
         showError('Error evaluating messages: ' + error.message);
     } finally {
         showLoading(false);
+    }
+}
+
+// Show n8n help modal
+function showN8nHelp() {
+    const modal = document.getElementById('n8nHelpModal');
+    if (modal) {
+        modal.style.display = 'block';
+    }
+}
+
+// Hide n8n help modal
+function hideN8nHelp() {
+    const modal = document.getElementById('n8nHelpModal');
+    if (modal) {
+        modal.style.display = 'none';
     }
 }
 

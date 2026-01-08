@@ -60,7 +60,9 @@ async function initializeDashboard() {
         const evaluateMessagesBtn = document.getElementById('evaluateMessagesBtn');
         const getWeeklyStatsBtn = document.getElementById('getWeeklyStatsBtn');
         const toggleSupabaseKeyBtn = document.getElementById('toggleSupabaseKeyBtn');
-        const toggleOpenAIKeyBtn = document.getElementById('toggleOpenAIKeyBtn');
+        const toggleAIKeyBtn = document.getElementById('toggleAIKeyBtn');
+        const showN8nHelpBtn = document.getElementById('showN8nHelpBtn');
+        const aiProviderSelect = document.getElementById('aiProviderSelect');
         
         if (toggleSupabaseBtn) toggleSupabaseBtn.addEventListener('click', toggleSupabaseConfig);
         if (saveSupabaseConfigBtn) saveSupabaseConfigBtn.addEventListener('click', saveSupabaseConfig);
@@ -68,7 +70,9 @@ async function initializeDashboard() {
         if (evaluateMessagesBtn) evaluateMessagesBtn.addEventListener('click', evaluateMessages);
         if (getWeeklyStatsBtn) getWeeklyStatsBtn.addEventListener('click', getWeeklyStatsFromSupabase);
         if (toggleSupabaseKeyBtn) toggleSupabaseKeyBtn.addEventListener('click', () => togglePasswordVisibility('supabaseKeyInput', 'toggleSupabaseKeyBtn'));
-        if (toggleOpenAIKeyBtn) toggleOpenAIKeyBtn.addEventListener('click', () => togglePasswordVisibility('openaiKeyInput', 'toggleOpenAIKeyBtn'));
+        if (toggleAIKeyBtn) toggleAIKeyBtn.addEventListener('click', () => togglePasswordVisibility('aiApiKeyInput', 'toggleAIKeyBtn'));
+        if (showN8nHelpBtn) showN8nHelpBtn.addEventListener('click', showN8nHelp);
+        if (aiProviderSelect) aiProviderSelect.addEventListener('change', updateAIProviderLabels);
         
         // Load saved Supabase config
         loadSupabaseConfig();
@@ -249,19 +253,30 @@ async function loadPerformanceData() {
             throw new Error(data.error);
         }
         
-        currentData = data;
+        // Merge Supabase stats if configured
+        let mergedData = data;
+        if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof mergeSupabaseStatsWithHeyReach === 'function') {
+            try {
+                mergedData = await mergeSupabaseStatsWithHeyReach(data, startDate, endDate);
+            } catch (error) {
+                console.warn('Could not merge Supabase stats:', error);
+                // Continue with original data if merge fails
+            }
+        }
+        
+        currentData = mergedData;
         
         // Check if we have data
-        if (!data || !data.senders || Object.keys(data.senders).length === 0) {
+        if (!mergedData || !mergedData.senders || Object.keys(mergedData.senders).length === 0) {
             showError('No data found for the selected date range and sender. Please try a different date range or check your HeyReach account.');
             showLoading(false);
             return;
         }
         
         // Update UI
-        updateSummary(data);
-        updatePerformanceTables(data);
-        updateChart(data);
+        updateSummary(mergedData);
+        updatePerformanceTables(mergedData);
+        updateChart(mergedData);
         
         // Show export section
         document.getElementById('exportSection').style.display = 'block';
@@ -840,6 +855,19 @@ async function sendToAppsScript() {
             return;
         }
         
+        // Merge Supabase stats if configured before sending
+        let dataToSend = null;
+        if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof mergeSupabaseStatsWithHeyReach === 'function') {
+            try {
+                // Get sender ID mapping from currentData if available
+                const senderIdMapping = currentData?.sender_id_mapping || {};
+                dataToSend = await mergeSupabaseStatsWithHeyReach(currentData, startDate, endDate, senderIdMapping);
+            } catch (error) {
+                console.warn('Could not merge Supabase stats before sending:', error);
+                // Continue without merged data if merge fails
+            }
+        }
+        
         const response = await fetch('/api/send-to-apps-script', {
             method: 'POST',
             headers: {
@@ -849,7 +877,8 @@ async function sendToAppsScript() {
                 apps_script_url: appsScriptUrl,
                 sender_id: senderId,
                 start_date: startDate,
-                end_date: endDate
+                end_date: endDate,
+                performance_data: dataToSend  // Send merged data if available, null otherwise
             })
         });
         

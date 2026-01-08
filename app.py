@@ -1003,12 +1003,16 @@ def send_to_apps_script():
             start_date = start_date_obj.strftime('%Y-%m-%d')
             end_date = end_date_obj.strftime('%Y-%m-%d')
         
-        # Get performance data
-        performance_data = client.get_sender_weekly_performance(
-            sender_id=None if sender_id == 'all' else sender_id,
-            start_date=start_date,
-            end_date=end_date
-        )
+        # Get performance data (use provided merged data from frontend if available, otherwise fetch from API)
+        performance_data = data.get('performance_data')
+        
+        if not performance_data:
+            # Fetch from HeyReach API if not provided
+            performance_data = client.get_sender_weekly_performance(
+                sender_id=None if sender_id == 'all' else sender_id,
+                start_date=start_date,
+                end_date=end_date
+            )
         
         if not performance_data:
             return jsonify({'error': 'No data available for the selected date range'}), 400
@@ -1128,7 +1132,14 @@ def send_to_apps_script():
             logger.info(f"Senders not in API (excluded): {senders_not_in_api}")
         
         # Update performance_data to include all senders found in API
-        performance_data['senders'] = final_senders
+        # If performance_data was provided from frontend (with Supabase stats merged), preserve it
+        if not data.get('performance_data'):
+            performance_data['senders'] = final_senders
+        else:
+            # Use the provided performance_data (already has Supabase stats merged from frontend)
+            # Just ensure the structure is correct
+            if 'senders' not in performance_data:
+                performance_data['senders'] = final_senders
         
         # Format data for Apps Script with sender IDs and client groups
         formatted_data = {

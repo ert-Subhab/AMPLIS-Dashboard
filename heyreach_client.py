@@ -1363,8 +1363,10 @@ class HeyReachClient:
                     'messages_sent': int(messages_sent),
                     'message_replies': int(message_replies),
                     'reply_rate': round(reply_rate, 2),
-                    'open_conversations': int(week_data.get('open_conversations', 0) or 0),
-                    'interested': int(week_data.get('interested', 0) or 0),
+                    # open_conversations and interested default to 0 unless Supabase/AI is configured
+                    # These will be populated from Supabase AI evaluation if configured
+                    'open_conversations': 0,  # Default to 0, will be updated from Supabase if configured
+                    'interested': 0,  # Default to 0, will be updated from Supabase if configured
                     'leads_not_enrolled': int(week_data.get('leads_not_enrolled', 0) or 0)
                 })
             return formatted_weeks

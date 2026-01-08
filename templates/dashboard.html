@@ -181,9 +181,77 @@
                                 <span class="btn-icon">🚀</span>
                                 <span>Send to Apps Script</span>
                             </button>
-                            <button id="showAppsScriptHelpBtn" class="btn btn-link" style="margin-top: 10px;">
-                                <span>📖 How to set up Apps Script</span>
-                            </button>
+                        <button id="showAppsScriptHelpBtn" class="btn btn-link" style="margin-top: 10px;">
+                            <span>📖 How to set up Apps Script</span>
+                        </button>
+                    </div>
+                    
+                    <!-- n8n to Supabase Help Modal -->
+                    <div id="n8nHelpModal" class="help-modal" style="display: none;">
+                        <div class="help-modal-content">
+                            <span class="help-modal-close" onclick="hideN8nHelp(); return false;">&times;</span>
+                            <h3>📖 How to Set Up n8n → Supabase Webhook</h3>
+                            <div class="help-steps">
+                                <div class="help-step">
+                                    <div class="step-number">1</div>
+                                    <div class="step-content">
+                                        <h4>Get Your Supabase Credentials</h4>
+                                        <p>Go to your Supabase Dashboard → <strong>Settings</strong> → <strong>API</strong></p>
+                                        <p>Copy your <strong>Project URL</strong> and <strong>anon/public key</strong></p>
+                                    </div>
+                                </div>
+                                <div class="help-step">
+                                    <div class="step-number">2</div>
+                                    <div class="step-content">
+                                        <h4>Create n8n Workflow</h4>
+                                        <p><strong>Add Webhook Node</strong> to receive from HeyReach</p>
+                                        <p><strong>Add HTTP Request Node</strong> to send to Supabase:</p>
+                                        <ul style="margin-left: 20px; line-height: 1.8;">
+                                            <li>URL: <code>https://YOUR-PROJECT.supabase.co/rest/v1/heyreach_messages</code></li>
+                                            <li>Method: <strong>POST</strong></li>
+                                            <li>Headers:
+                                                <ul>
+                                                    <li><code>apikey</code>: Your anon key</li>
+                                                    <li><code>Authorization</code>: <code>Bearer YOUR-ANON-KEY</code></li>
+                                                    <li><code>Content-Type</code>: <code>application/json</code></li>
+                                                </ul>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="help-step">
+                                    <div class="step-number">3</div>
+                                    <div class="step-content">
+                                        <h4>Map the Data</h4>
+                                        <p>In HTTP Request body (JSON):</p>
+                                        <pre style="background-color: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 11px;">{
+  "correlation_id": "{{ $json.body.correlation_id }}",
+  "event_type": "{{ $json.body.event_type }}",
+  "timestamp": "{{ $json.body.timestamp }}",
+  "is_inmail": {{ $json.body.is_inmail }},
+  "conversation_id": "{{ $json.body.conversation_id }}",
+  "campaign": {{ $json.body.campaign }},
+  "sender": {{ $json.body.sender }},
+  "lead": {{ $json.body.lead }},
+  "recent_messages": {{ $json.body.recent_messages }}
+}</pre>
+                                    </div>
+                                </div>
+                                <div class="help-step">
+                                    <div class="step-number">4</div>
+                                    <div class="step-content">
+                                        <h4>Test & Activate</h4>
+                                        <p>Activate your n8n workflow and test with a HeyReach webhook.</p>
+                                        <p>Check your Supabase table to verify data is being inserted.</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <button onclick="hideN8nHelp(); return false;" class="btn btn-primary" style="margin-top: 20px;">Got it!</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Apps Script Help Modal -->
+                    <div id="appsScriptHelpModal" class="help-modal" style="display: none;">
                         </div>
                         <button id="toggleAppsScriptBtn" class="btn btn-export">
                             <span class="btn-icon">⚙️</span>
@@ -235,17 +303,32 @@
                     </div>
                     
                     <div class="filter-group" style="margin-bottom: 15px;">
-                        <label for="openaiKeyInput">OpenAI API Key:</label>
+                        <label for="aiProviderSelect">AI Provider:</label>
+                        <select id="aiProviderSelect" class="filter-input" style="width: 100%;">
+                            <option value="openai">OpenAI (ChatGPT)</option>
+                            <option value="claude">Anthropic (Claude)</option>
+                            <option value="gemini">Google (Gemini)</option>
+                        </select>
+                        <small style="color: #666; margin-top: 5px; display: block;">Select which AI provider to use for message evaluation.</small>
+                    </div>
+                    
+                    <div class="filter-group" style="margin-bottom: 15px;">
+                        <label for="aiApiKeyInput" id="aiApiKeyLabel">OpenAI API Key:</label>
                         <div style="display: flex; gap: 10px; align-items: center;">
-                            <input type="password" id="openaiKeyInput" class="filter-input" placeholder="sk-..." style="flex: 1;">
-                            <button type="button" id="toggleOpenAIKeyBtn" class="btn" style="padding: 8px 15px; background-color: #6c757d; color: white;">Show</button>
+                            <input type="password" id="aiApiKeyInput" class="filter-input" placeholder="Enter API key..." style="flex: 1;">
+                            <button type="button" id="toggleAIKeyBtn" class="btn" style="padding: 8px 15px; background-color: #6c757d; color: white;">Show</button>
                         </div>
-                        <small style="color: #666; margin-top: 5px; display: block;">Your OpenAI API key for AI evaluation. Get it from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>.</small>
+                        <small style="color: #666; margin-top: 5px; display: block;" id="aiApiKeyHelp">
+                            Your OpenAI API key. Get it from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>.
+                        </small>
                     </div>
                     
                     <div class="filter-group" style="margin-bottom: 15px;">
                         <button id="saveSupabaseConfigBtn" class="btn btn-primary">Save Configuration</button>
                         <button id="testSupabaseConnectionBtn" class="btn" style="background-color: #6c757d; color: white; margin-left: 10px;">Test Connection</button>
+                        <button id="showN8nHelpBtn" class="btn btn-link" style="margin-left: 10px;">
+                            <span>📖 How to set up n8n → Supabase</span>
+                        </button>
                     </div>
                     
                     <div id="supabaseStatus" style="display: none; padding: 10px; border-radius: 4px; margin-top: 10px;"></div>
